@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run FastAPI (auto reload)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/.venv/bin/uvicorn",
+      "args": [
+        "backend.api:app",
+        "--reload",
+        "--port", "8000"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Run Streamlit (auto reload)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/.venv/bin/streamlit",
+      "args": [
+        "run",
+        "frontend/app.py",
+        "--server.runOnSave", "true"
+      ],
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Run Both (FastAPI + Streamlit)",
+      "configurations": [
+        "Run FastAPI (auto reload)",
+        "Run Streamlit (auto reload)"
+      ]
+    }
+  ]
+}

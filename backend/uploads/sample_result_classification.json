@@ -1,0 +1,12 @@
+[
+  {"epoch": 1, "train_acc": 0.52, "val_acc": 0.48, "train_f1": 0.50, "val_f1": 0.46},
+  {"epoch": 2, "train_acc": 0.60, "val_acc": 0.55, "train_f1": 0.57, "val_f1": 0.53},
+  {"epoch": 3, "train_acc": 0.68, "val_acc": 0.61, "train_f1": 0.65, "val_f1": 0.60},
+  {"epoch": 4, "train_acc": 0.74, "val_acc": 0.66, "train_f1": 0.70, "val_f1": 0.65},
+  {"epoch": 5, "train_acc": 0.78, "val_acc": 0.70, "train_f1": 0.74, "val_f1": 0.69},
+  {"epoch": 6, "train_acc": 0.81, "val_acc": 0.73, "train_f1": 0.77, "val_f1": 0.72},
+  {"epoch": 7, "train_acc": 0.83, "val_acc": 0.75, "train_f1": 0.79, "val_f1": 0.74},
+  {"epoch": 8, "train_acc": 0.85, "val_acc": 0.77, "train_f1": 0.81, "val_f1": 0.76},
+  {"epoch": 9, "train_acc": 0.86, "val_acc": 0.78, "train_f1": 0.82, "val_f1": 0.77},
+  {"epoch": 10, "train_acc": 0.87, "val_acc": 0.80, "train_f1": 0.83, "val_f1": 0.78}
+]
