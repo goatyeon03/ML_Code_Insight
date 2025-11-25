@@ -1,0 +1,6 @@
+sample_codes/
+.env
+__pycache__/
+.venv/
+.vscode/
+ml_code_insight.db
