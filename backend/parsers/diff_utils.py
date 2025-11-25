@@ -76,3 +76,4 @@ def summarize_functions(file_x: str):
     for n, s, e, _ in _extract_functions(file_x):
         out.append({"name": n, "lineno": s, "end_lineno": e})
     return out
+

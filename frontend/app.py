@@ -11,9 +11,56 @@ from modules.project_dashboard import render_project_dashboard
 
 st.set_page_config(page_title="ML Code Insight", layout="wide")
 
-# 🔥 절대로 Streamlit에서 init_db()를 호출하지 말 것!
-# from utils.db import init_db
-# init_db()   # ❌ 제거 — FastAPI 서버에서만 실행해야 함!
+st.markdown("""
+<style>
+.help-container {
+    position: fixed;   /* 화면 전체 기준 고정 */
+    top: 10px;
+    left: 10px;
+    z-index: 999999;   /* 최상단 */
+}
+
+.help-icon {
+    font-size: 24px;
+    cursor: default;
+}
+
+.help-tooltip {
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+
+    position: absolute;
+    top: 32px;
+    left: 0;
+
+    width: 270px;
+    background: #333;
+    color: white;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 15px;
+}
+.help-container:hover .help-tooltip {
+    visibility: visible;
+    opacity: 1;
+}
+</style>
+
+<div class="help-container">
+    <div class="help-icon">❓</div>
+    <div class="help-tooltip">
+        <b>사이트 이용 방법</b><br><br>
+        • 프로젝트 생성/선택<br>
+        • 코드 파일 업로드 → 자동 분석<br>
+        • 결과 JSON 업로드 → 자동 매칭/시각화<br>
+        • 리더보드에서 성능 확인<br><br>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+
 
 # 사이드바 X 버튼 스타일 (기존 유지)
 st.sidebar.markdown("""
@@ -43,6 +90,18 @@ st.sidebar.markdown("""
 """, unsafe_allow_html=True)
 
 ensure_session()
+
+
+
+# -----------------------------------------------------------
+# 🔁 브라우저 새로고침 시 selected_project 복원
+# -----------------------------------------------------------
+if "project" in st.query_params:
+    try:
+        st.session_state["selected_project"] = int(st.query_params["project"])
+    except:
+        pass
+
 
 
 # -----------------------------------------------------------
@@ -84,6 +143,7 @@ def render_sidebar():
 # 🔥 메인 화면
 # -----------------------------------------------------------
 def main():
+
     if not st.session_state.get("user_id"):
         st.markdown("""
         <div style="text-align: center; padding-top: 60px;">
@@ -138,6 +198,25 @@ def main():
         return
 
     render_project_dashboard(project_id, st.session_state["user_id"])
+
+    # --------------------------------------------------------
+    # 🔥 Add JS Event Listener for postMessage
+    # --------------------------------------------------------
+    streamlit_message_listener = """
+    <script>
+    window.addEventListener("message", (event) => {
+        if (event.data && event.data.type === "restore_project") {
+            const pid = event.data.project;
+            const url = new URL(window.location.href);
+            url.searchParams.set("selected_project_msg", pid);
+            window.location.href = url.toString();
+        }
+    });
+    </script>
+    """
+
+    st.markdown(streamlit_message_listener, unsafe_allow_html=True)
+
 
 
 if __name__ == "__main__":

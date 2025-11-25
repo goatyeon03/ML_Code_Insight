@@ -8,6 +8,10 @@ import shutil
 import json
 
 from frontend.utils.db import get_conn, init_db
+from frontend.utils.match_utils import match_code_and_results
+
+from backend.routes.account import router as account_router
+from backend.parsers.param_counter import get_param_count
 
 # 서버 시작 시 한 번만 스키마 초기화
 init_db()
@@ -19,6 +23,8 @@ os.makedirs(UPLOAD_CODE, exist_ok=True)
 os.makedirs(UPLOAD_RESULT, exist_ok=True)
 
 app = FastAPI(title="ML Code Insight API", version="0.2.0")
+
+app.include_router(account_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -204,11 +210,91 @@ def get_model_blocks(filename: str = Query(..., description="코드 파일 이�
 
 @app.post("/delete_file")
 async def delete_file(user_id: int = Form(...), file_id: int = Form(...)):
+    """
+    코드 파일 삭제 시 → 매칭된 result 파일까지 자동 삭제.
+    result 파일 삭제 시 → 그 파일만 삭제.
+    """
+
     conn = get_conn()
     cur = conn.cursor()
+
     try:
+        # 1) 삭제 대상 파일 정보 조회 (filename, filetype)
+        cur.execute("""
+            SELECT filename, filetype
+            FROM files
+            WHERE id=? AND user_id=?
+        """, (file_id, user_id))
+        row = cur.fetchone()
+
+        if not row:
+            conn.close()
+            return {"error": "File not found"}
+
+        filename, filetype = row
+
+        # 2) 실제 파일 삭제 경로 결정
+        base_path = UPLOAD_CODE if filetype == "code" else UPLOAD_RESULT
+        full_path = os.path.join(base_path, filename)
+
+        # 3) 프로젝트 ID 조회 (해당 파일이 속해 있는 모든 프로젝트)
+        cur.execute("""
+            SELECT project_id
+            FROM project_files
+            WHERE file_id=?
+        """, (file_id,))
+        project_rows = cur.fetchall()
+        project_ids = [r[0] for r in project_rows]
+
+        matched_results = []
+
+        # 4) code 파일인 경우 → result 파일 자동 삭제 로직 실행
+        if filetype == "code":
+            from frontend.utils.match_utils import match_code_and_results
+
+            for pid in project_ids:
+                # pid 내 모든 code/result 파일 조회
+                cur.execute("""
+                    SELECT f.filename
+                    FROM files f JOIN project_files pf ON pf.file_id=f.id
+                    WHERE pf.project_id=? AND f.user_id=? AND f.filetype='code'
+                """, (pid, user_id))
+                code_files = [r[0] for r in cur.fetchall()]
+
+                cur.execute("""
+                    SELECT f.filename
+                    FROM files f JOIN project_files pf ON pf.file_id=f.id
+                    WHERE pf.project_id=? AND f.user_id=? AND f.filetype='result'
+                """, (pid, user_id))
+                result_files = [r[0] for r in cur.fetchall()]
+
+                # 매칭 실행
+                pairs = match_code_and_results(code_files, result_files)
+                matched = pairs.get(filename, [])
+                matched_results.extend(matched)
+
+                # result 파일 DB + 실제 파일 삭제
+                for rname in matched:
+                    # DB에서 찾기
+                    cur.execute("""
+                        SELECT id FROM files
+                        WHERE user_id=? AND filename=? AND filetype='result'
+                    """, (user_id, rname))
+                    rrow = cur.fetchone()
+                    if rrow:
+                        rid = rrow[0]
+                        cur.execute("DELETE FROM project_files WHERE file_id=?", (rid,))
+                        cur.execute("DELETE FROM files WHERE id=? AND user_id=?", (rid, user_id))
+
+                        # 실제 파일 삭제
+                        result_path = os.path.join(UPLOAD_RESULT, rname)
+                        if os.path.exists(result_path):
+                            os.remove(result_path)
+
+        # 5) 코드/결과 파일 자체 삭제 (DB + 실제 파일)
         cur.execute("DELETE FROM project_files WHERE file_id=?", (file_id,))
         cur.execute("DELETE FROM files WHERE id=? AND user_id=?", (file_id, user_id))
+
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -216,7 +302,16 @@ async def delete_file(user_id: int = Form(...), file_id: int = Form(...)):
     finally:
         conn.close()
 
-    return {"status": "ok", "file_id": file_id}
+    # 실제 파일 삭제
+    if os.path.exists(full_path):
+        os.remove(full_path)
+
+    return {
+        "status": "ok",
+        "deleted_code_or_result": filename,
+        "auto_deleted_results": matched_results
+    }
+
 
 @app.post("/create_project")
 async def create_project(user_id: int = Form(...), project_name: str = Form(...)):
@@ -241,3 +336,8 @@ def api_delete_project(user_id: int = Form(...), project_id: int = Form(...)):
     from frontend.utils.db import delete_project_and_unused_files
     result = delete_project_and_unused_files(project_id, user_id)
     return result
+
+@app.get("/param_count")
+def api_param_count(filename: str):
+    file_path = os.path.join(UPLOAD_CODE, filename)
+    return get_param_count(file_path)

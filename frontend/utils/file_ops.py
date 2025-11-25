@@ -8,15 +8,11 @@ API_URL = "http://localhost:8000"
 # ------------------------------------------------------------
 # 1) 코드 파일 업로드 (write → FastAPI)
 # ------------------------------------------------------------
-def upload_code_api(user_id, project_id, cf):
-    """
-    Streamlit FileUploader 객체 cf를 FastAPI로 보냄.
-    DB write는 오직 FastAPI만 수행.
-    """
+def upload_code_api(user_id, project_id, cf, override_name=None):
+    filename = override_name if override_name else cf.name
 
-    # Streamlit의 cf.getvalue() → bytes
     files = {
-        "file": (cf.name, cf.getvalue(), "text/x-python")
+        "file": (filename, cf.getvalue(), "text/x-python")
     }
     data = {"user_id": user_id, "project_id": project_id}
 
@@ -30,6 +26,7 @@ def upload_code_api(user_id, project_id, cf):
         return res.json()
     except Exception as e:
         return {"error": str(e)}
+
 
 
 # ------------------------------------------------------------
@@ -110,3 +107,12 @@ def delete_project_api(user_id, project_id):
         return resp.json()
     except Exception as e:
         return {"error": str(e)}
+    
+def delete_account_api(user_id: int):
+    import requests
+    url = f"{API_URL}/delete_account"
+    res = requests.delete(url, json={"user_id": user_id})
+    try:
+        return res.json()
+    except:
+        return {"error": "Invalid response from server"}

@@ -15,20 +15,28 @@ def app():
     if not user_id:
         st.info("Please log in first.")
         return
+    
+    project_id = st.session_state.get("selected_project")
+    if not project_id:
+        st.info("Please select a project first.")
+        return
 
     conn = get_conn()
 
     df_codes = pd.read_sql("""
-        SELECT filename
-        FROM files
-        WHERE user_id=? AND filetype='code'
-    """, conn, params=(user_id,))
+        SELECT f.filename
+        FROM files f
+        JOIN project_files pf ON pf.file_id = f.id
+        WHERE pf.project_id=? AND f.user_id=? AND f.filetype='code'
+    """, conn, params=(project_id, user_id))
 
     df_results = pd.read_sql("""
-        SELECT filename, preview_json
-        FROM files
-        WHERE user_id=? AND filetype='result'
-    """, conn, params=(user_id,))
+        SELECT f.filename, f.preview_json
+        FROM files f
+        JOIN project_files pf ON pf.file_id = f.id
+        WHERE pf.project_id=? AND f.user_id=? AND f.filetype='result'
+    """, conn, params=(project_id, user_id))
+
 
     code_files = df_codes["filename"].tolist()
     result_files = df_results["filename"].tolist()

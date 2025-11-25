@@ -1,7 +1,0 @@
-[
-    {"epoch": 1, "train_acc": 0.60, "val_acc": 0.63, "train_loss": 1.3, "val_loss": 1.15},
-    {"epoch": 2, "train_acc": 0.67, "val_acc": 0.70, "train_loss": 1.1, "val_loss": 1.0},
-    {"epoch": 3, "train_acc": 0.73, "val_acc": 0.76, "train_loss": 0.95, "val_loss": 0.88},
-    {"epoch": 4, "train_acc": 0.77, "val_acc": 0.80, "train_loss": 0.85, "val_loss": 0.79},
-    {"epoch": 5, "train_acc": 0.80, "val_acc": 0.83, "train_loss": 0.78, "val_loss": 0.74}
-]

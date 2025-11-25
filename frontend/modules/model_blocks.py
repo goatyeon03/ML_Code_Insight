@@ -71,62 +71,66 @@ def parse_dim_input(text: str) -> str:
 # ------------------------------------------------------
 # 3) Pipeline Flow (streamlit-flow-component)
 # ------------------------------------------------------
-def render_pipeline_graphviz(pipeline, models, input_dim=None, output_dim=None):
-    """
-    Graphviz를 이용해 정적 다이어그램(가로 흐름)을 렌더링하는 함수.
-    """
+def render_pipeline_graphviz(pipeline, models, area, input_dim=None, output_dim=None):
     dot = gv.Digraph("Pipeline", format="svg")
     dot.attr(rankdir="LR", splines="ortho", nodesep="1.0")
+    # HTML label 쓸 거라 fontsize는 여기선 크게 의미 없음
+    dot.attr("node", shape="box", style="rounded,filled", fillcolor="#FFF8E1")
 
-    # 공통 스타일
-    dot.attr("node", shape="box", style="rounded,filled", fillcolor="#FFF8E1", fontsize="12")
-
-    # -------------------------------
-    # Input node
-    # -------------------------------
-    # if input_dim:
-    #     dot.node("INPUT", f"Input\nshape={input_dim}", fillcolor="#E3F2FD")
-
-    # -------------------------------
-    # Each model block
-    # -------------------------------
     for cls in pipeline:
         model_info = models.get(cls, {})
         blocks = model_info.get("blocks", [])
 
+        # 레이어 목록 문자열
         bullet_lines = []
         for blk in blocks:
             for layer in blk.get("layers", []):
                 ltype = layer.get("layer_type", "")
                 args = layer.get("args", "")
-                bullet_lines.append(f"• {ltype}({args})")
+                bullet_lines.append(f"{ltype}({args})")   # ← 여기서 bullet 제거!
 
-        label = f"{cls}\n" + "\n".join(bullet_lines)
-        dot.node(cls, label)
 
-    # -------------------------------
-    # Output node
-    # -------------------------------
-    # if output_dim:
-    #     dot.node("OUTPUT", f"Output\nshape={output_dim}", fillcolor="#E8F5E9")
+        if bullet_lines:
+            # HTML label용 줄바꿈
+            bullet_html = "<BR ALIGN='LEFT'/>".join(bullet_lines)
+        else:
+            bullet_html = ""
 
-    # -------------------------------
-    # Arrows
-    # -------------------------------
-    # if input_dim:
-    #     dot.edge("INPUT", pipeline[0])
+        layers_html = "".join(
+            f"<TR><TD ALIGN='LEFT'><FONT POINT-SIZE='10'>• {line}</FONT></TD></TR>"
+            for line in bullet_lines
+        )
 
-    for i in range(len(pipeline)-1):
-        dot.edge(pipeline[i], pipeline[i+1])
+        label_html = f"""<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+        <TR>
+            <TD ALIGN="CENTER">
+            <B><FONT POINT-SIZE="12">{cls}</FONT></B>
+            </TD>
+        </TR>
+        {layers_html}
+        </TABLE>
+        >"""
 
-    # if output_dim:
-    #     dot.edge(pipeline[-1], "OUTPUT")
 
-    # -------------------------------
-    # Render
-    # -------------------------------
-    # st.markdown("### Model Pipeline Diagram")
-    st.graphviz_chart(dot)
+        dot.node(cls, label=label_html)
+
+    for i in range(len(pipeline) - 1):
+        dot.edge(pipeline[i], pipeline[i + 1])
+
+    # 아래는 너가 이미 쓰고 있는 SVG→img 부분 그대로
+    import base64
+    svg_bytes = dot.pipe(format="svg")
+    svg_base64 = base64.b64encode(svg_bytes).decode("utf-8")
+
+    html = f"""
+    <div style="display:flex; justify-content:center;">
+        <img src="data:image/svg+xml;base64,{svg_base64}" style="max-width: 100%; height: auto;">
+    </div>
+    """
+
+    area.markdown(html, unsafe_allow_html=True)
+
 
 
 # ------------------------------------------------------
@@ -221,16 +225,17 @@ def app():
     # input_dim = parse_dim_input(raw_input_dim)
     # output_dim = parse_dim_input(raw_output_dim)
 
-    # --------------------------------------------------
-    # Pipeline Flow 렌더링
-    # --------------------------------------------------
-    if "pipeline" in data:
-        render_pipeline_graphviz(
-            pipeline=data["pipeline"],
-            models=models,
-            # input_dim=input_dim,
-            # output_dim=output_dim
-        )
+    # # --------------------------------------------------
+    # # Pipeline Flow 렌더링
+    # # --------------------------------------------------
+    # if "pipeline" in data:
+    #     diagram_area = st.empty()  # 🔥 여기서 placeholder 생성
+    #     render_pipeline_graphviz(
+    #         pipeline=data["pipeline"],
+    #         models=models,
+    #         area=diagram_area
+    #     )
+
 
 
     # --------------------------------------------------
