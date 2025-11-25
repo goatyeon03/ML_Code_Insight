@@ -1,24 +1,13 @@
-## Soyeon Yang  
 
-🎓 Student | Dept. of Artificial Intelligence, SEOULTECH  
-🔬 Research Interests: **Neuroscience**, **Human EEG**, **Illness Detection with AI**  
+# 🧠 ML Code Insight  
+*A Streamlit + FastAPI-based platform for analyzing ML training code, visualizing model structures, and managing experiment results.*
 
----
+## 📌 Overview
+ML Code Insight is a system for uploading ML training scripts, automatically parsing their structure, visualizing model architecture, and matching training results.
 
-### 🔬 Research Interests
-- **Neuroscience**: Neural mechanisms underlying behavior and cognition  
-- **Human EEG**: Signal processing, feature extraction, and deep learning approaches  
-- **Illness Detection**: AI-driven models for early diagnosis of neurological and mental disorders  
-
----
-
-### 🛠 Skills
-- **Programming**: Python, C/C#, Java, HTML/CSS/JavaScript 
-- **AI/ML**: PyTorch, scikit-learn
-- **Data Science**: Pandas, NumPy, Matplotlib, Seaborn  
-- **Tools**: Git, VSCode, Jupyter, Linux  
-
----
-
-### 📫 Contact
-- **Email**: uaua1595@naver.com  
+## Features
+- Code upload & auto summary
+- AST-based model structure extraction
+- Graphviz pipeline visualization
+- JSON result matching & metric plotting
+- Project-level leaderboard

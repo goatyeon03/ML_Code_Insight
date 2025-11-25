@@ -1,6 +1,9 @@
 sample_codes/
 .env
 __pycache__/
+__init__.py
 .venv/
 .vscode/
-ml_code_insight.db
+ml_insight.db
+session_state.json
+backend/uploads/
