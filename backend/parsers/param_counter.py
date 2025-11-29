@@ -8,6 +8,21 @@ import torch
 import torch.nn as nn
 from types import ModuleType
 
+def force_single_model(model_name: str):
+    """
+    param_counter의 결과 dict 구조 형태에 맞춘 단일 모델 강제 설정.
+    """
+    return {
+        "results": {
+            model_name: {
+                "total_params": None,
+                "trainable_params": None,
+                "error": None
+            }
+        },
+        "error": None
+    }
+
 
 # ============================================================
 # 🔥 Robust NN.Module inheritance detection
@@ -237,3 +252,45 @@ def get_param_count(file_path: str):
         "results": results,
         "error": None
     }
+
+def get_param_count_for_class(file_path: str, class_name: str):
+    """
+    refined_summary 또는 dashboard가 전달한 class_name 기반으로만 파라미터 계산.
+    extract_model_classes를 사용하지 않고, 지정된 클래스만 사용.
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            src = f.read()
+    except Exception as e:
+        return {"results": {}, "error": f"file read error: {e}"}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_file = os.path.join(tmpdir, "model_temp.py")
+
+        # 사용자 모델 임시 저장
+        with open(temp_file, "w", encoding="utf-8") as f:
+            f.write(src)
+
+        # 모델 로드 시도
+        cls, err = load_class_from_file(temp_file, class_name)
+        if err:
+            return force_single_model(class_name)
+
+        # 인스턴스 생성
+        instance = instantiate_model(cls)
+        if isinstance(instance, str):  # 에러 메세지
+            return force_single_model(class_name)
+
+        # 파라미터 계산
+        total, trainable, err = count_params(instance)
+
+        return {
+            "results": {
+                class_name: {
+                    "total_params": total,
+                    "trainable_params": trainable,
+                    "error": err
+                }
+            },
+            "error": None
+        }

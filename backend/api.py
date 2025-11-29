@@ -11,7 +11,7 @@ from frontend.utils.db import get_conn, init_db
 from frontend.utils.match_utils import match_code_and_results
 
 from backend.routes.account import router as account_router
-from backend.parsers.param_counter import get_param_count
+from backend.parsers.param_counter import get_param_count_for_class
 
 # 서버 시작 시 한 번만 스키마 초기화
 init_db()
@@ -48,10 +48,10 @@ async def upload_code(
     user_id: int = Form(...),
     project_id: int = Form(...),
     file: UploadFile = File(...),
-    override_name: str = Form(None),   # ⭐ 추가
+    override_name: str = Form(None),
 ):
     # --------------------------
-    # 1) 실제 저장 파일명 결정
+    # 1) 저장 파일명 결정
     # --------------------------
     filename = override_name if override_name else file.filename
     save_path = os.path.join(UPLOAD_CODE, filename)
@@ -64,26 +64,55 @@ async def upload_code(
         file.file.close()
 
     # --------------------------
-    # 2) summary 생성
+    # 2) AST summary 생성
     # --------------------------
     from backend.parsers.code_parser import summarize_code
-
     try:
-        summary = summarize_code(save_path)
+        ast_summary = summarize_code(save_path)
     except Exception as e:
-        summary = {"error": str(e)}
+        ast_summary = {"error": f"AST parse error: {e}"}
 
     # summary 구조 보정
-    if not isinstance(summary, dict):
-        summary = {"error": "invalid summary"}
+    if not isinstance(ast_summary, dict):
+        ast_summary = {"error": "invalid summary"}
 
+    # --------------------------
+    # 3) 코드 원문 읽기
+    # --------------------------
+    try:
+        with open(save_path, "r", encoding="utf-8") as f:
+            code_text = f.read()
+    except Exception as e:
+        code_text = ""
+        ast_summary.setdefault("notes", "")
+        ast_summary["notes"] += f"\n[WARN] Could not read code text: {e}"
+
+    # --------------------------
+    # 4) LLM refine 호출
+    # --------------------------
+    from backend.llm.refine_summary import refine_summary_with_gemini
+
+
+    try:
+        refined_summary = refine_summary_with_gemini(ast_summary, code_text)
+        
+
+    except Exception as e:
+        # LLM 오류 발생하면 AST summary 사용
+        refined_summary = ast_summary
+        refined_summary.setdefault("notes", "")
+        refined_summary["notes"] += f"\n[LLM refine failed: {e}]"
+
+    summary = refined_summary
+
+    # summary 기본 키 유지
     summary.setdefault("model", {})
     summary.setdefault("training", {})
     summary.setdefault("dataset", {})
     summary.setdefault("misc", {})
 
     # --------------------------
-    # 3) DB 저장
+    # 5) DB 저장
     # --------------------------
     conn = get_conn()
     cur = conn.cursor()
@@ -125,6 +154,9 @@ async def upload_code(
     finally:
         conn.close()
 
+    # --------------------------
+    # 6) 반환
+    # --------------------------
     return {
         "filename": filename,
         "summary": summary,
@@ -353,6 +385,163 @@ def api_delete_project(user_id: int = Form(...), project_id: int = Form(...)):
     return result
 
 @app.get("/param_count")
-def api_param_count(filename: str):
+def api_param_count(filename: str, class_name: str):
     file_path = os.path.join(UPLOAD_CODE, filename)
-    return get_param_count(file_path)
+    return get_param_count_for_class(file_path, class_name)
+
+
+@app.post("/param_count_enhanced")
+async def param_count_enhanced(
+    filename: str = Form(...),
+    class_name: str = Form(...)
+):
+    from backend.parsers.param_counter import get_param_count_for_class
+    from backend.llm.gemini import gemini_free
+
+    file_path = os.path.join(UPLOAD_CODE, filename)
+
+    # -----------------------------
+    # 1) param_counter 기반 계산
+    # -----------------------------
+    pc_result = get_param_count_for_class(file_path, class_name)
+
+    # -----------------------------
+    # 2) LLM 추정 (프롬프트 생략)
+    # -----------------------------
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            code_text = f.read()
+    except:
+        code_text = ""
+
+    llm_prompt = """
+You are an AI system that analyzes arbitrary PyTorch code and computes the 
+number of trainable parameters WITHOUT relying on any externally provided 
+model class name. You must infer everything directly from the code.
+
+Your tasks:
+
+===============================================================
+1) Identify the actual model used for training
+===============================================================
+From the entire code:
+
+- Identify which object serves as the REAL MODEL.
+- Acceptable candidates:
+  * Any class inheriting from nn.Module
+  * Any object created via composition (front/backbone/head)
+  * Any nn.Sequential used as the top-level model
+
+Rules:
+- Ignore helper functions such as evaluate(), train_epoch(), inference(), validate(), etc.
+- Ignore dataset/dataloader/optimizer/loss definitions.
+- Ignore modules that are only used inside another module (SEBlock, CBraModBlock, etc.).
+- If a model is created via:
+      model = RegressionHead(backbone)
+  then RegressionHead IS the real model.
+
+- If the model is:
+      model = nn.Sequential(front, se, backbone)
+  treat the Sequential composition as the FULL model.
+
+- If multiple nn.Module classes exist:
+  choose the one that produces final predictions and is instantiated before training.
+
+===============================================================
+2) Reconstruct model architecture and compute parameters
+===============================================================
+For every layer, compute parameter counts explicitly.
+
+Linear(in, out):
+  params = (in * out) + out
+
+Conv1d(in_channels, out_channels, kernel_size):
+  params = (in_channels * out_channels * kernel_size) + out_channels
+
+Conv2d(in, out, kH, kW):
+  params = (in * out * kH * kW) + out
+
+BatchNorm:
+  params = num_features * 2
+
+For custom modules:
+- Inspect __init__()
+- Identify submodules (Conv/Linear/etc.)
+- Recursively sum parameters
+
+If necessary, infer missing shapes logically from context.
+
+===============================================================
+3) If shapes cannot be determined reliably:
+===============================================================
+Set estimated_params = null  
+and explain which shapes caused ambiguity.
+
+===============================================================
+4) Final output (STRICT JSON)
+===============================================================
+Return ONLY JSON:
+
+{
+  "model_class": "<the model class or 'Sequential' or composition>",
+  "estimated_params": <int or null>,
+  "reasoning": "<step-by-step explanation of: 
+                  (a) how the model was identified, 
+                  (b) each layer's parameter calculation,
+                  (c) any inference or fallback logic used>"
+}
+
+NO markdown. NO backticks. NO text outside JSON.
+
+===============================================================
+Python Code:
+```python
+{code_text}
+
+
+"""
+
+    llm_raw = gemini_free(llm_prompt)
+
+    import json, re
+    llm_estimate = {"estimated_params": None, "reasoning": ""}
+    try:
+        match = re.search(r"(\{.*\})", llm_raw, re.DOTALL)
+        if match:
+            llm_estimate = json.loads(match.group(1))
+    except:
+        pass
+
+    # -----------------------------
+    # 3) 결과 병합
+    # -----------------------------
+    pc_val = None
+    try:
+        pc_val = pc_result["results"][class_name]["total_params"]
+    except:
+        pc_val = None
+
+    llm_val = llm_estimate.get("estimated_params")
+
+    # 병합 규칙
+    if pc_val and llm_val:
+        merged = pc_val
+        notes = f"LLM estimated {llm_val}, param_counter calculated {pc_val}."
+    elif pc_val:
+        merged = pc_val
+        notes = "LLM estimate unavailable; using param_counter value."
+    elif llm_val:
+        merged = llm_val
+        notes = "param_counter failed; using LLM estimate."
+    else:
+        merged = None
+        notes = "Both param_counter and LLM estimation failed."
+
+    return {
+        "merged": merged,
+        "param_counter": pc_result,
+        "llm_estimate": llm_estimate,
+        "notes": notes,
+    }
+
+ 

@@ -1,6 +1,5 @@
 sample_codes/
 .env
-__pycache__/
 __init__.py
 
 ml_insight.db
@@ -20,3 +19,5 @@ __pycache__/
 
 # VSCode 설정 폴더 무시
 .vscode/
+
+*.txt

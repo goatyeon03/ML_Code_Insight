@@ -156,6 +156,18 @@ def render_project_dashboard(project_id: int, user_id: int):
     training = summary.get("training", {})
     model_info = summary.get("model", {})
 
+    stages = training.get("stages", {}) or {}
+    overall = training.get("overall", {}) or {}
+
+    model_class_name = (
+        model_info.get("class_name")
+        or model_info.get("name")
+        or overall.get("model_class")
+        or stages.get("train", {}).get("model_class")
+        or stages.get("finetune", {}).get("model_class")
+        or stages.get("pretrain", {}).get("model_class")
+    )
+
 
     st.markdown("### 🔍 DEBUG: Training Summary Data")
     st.json(training)
@@ -211,13 +223,8 @@ def render_project_dashboard(project_id: int, user_id: int):
                 from modules.model_blocks import render_model_tree
                 render_model_tree(chosen, models)
 
-    # -------------------------
-    # (오른쪽) Model + Training Parameters (Stage-aware)
-    # -------------------------
-    with col_right:
-        st.markdown("#### ⚙️ Training Parameters")
 
-        def show_param(key, value):
+    def show_param(key, value):
             st.markdown(
                 f"""
                 <div style="display: flex; justify-content: space-between; padding:6px 12px; 
@@ -228,147 +235,123 @@ def render_project_dashboard(project_id: int, user_id: int):
                 """,
                 unsafe_allow_html=True
             )
+    
+    # -------------------------
+    # (오른쪽) Model + Training Parameters (Stage-aware)
+    # -------------------------
+    with col_right:
+        st.markdown("#### ⚙️ Training Parameters")
+
+        training = summary.get("training", {})
+        stages = training.get("stages", {})
+        # overall = training.get("overall", {})
 
         # -------------------------
-        # 🔥 Pretrained 플래그
-        # -------------------------
-        pretrained_raw = training.get("pretrained")
-
-        # 표시용 + 내부 bool 플래그 둘 다 만들기
-        if isinstance(pretrained_raw, bool):
-            is_pretrained = pretrained_raw
-        elif isinstance(pretrained_raw, str):
-            pl = pretrained_raw.strip().lower()
-            if pl in ("yes", "y", "true", "1"):
-                is_pretrained = True
-            elif pl in ("no", "n", "false", "0"):
-                is_pretrained = False
-            else:
-                is_pretrained = False   # 애매하면 False 쪽으로
-        else:
-            is_pretrained = False
-
-        pretrained_str = "Yes" if is_pretrained else "No"
-        show_param("Pretrained", pretrained_str)
-
-        # -------------------------
-        # 🔧 공통 포맷터: pretrain / finetune 값 합쳐서 보여주기
-        # -------------------------
-        def format_stage_value(
-            pre_val,
-            ft_val,
-            single_val=None,
-            add_labels=True,
-        ):
-            """
-            - pre_val, ft_val: pretrain/finetune용 값 (None 또는 값)
-            - single_val: pretrain 안 쓰는 경우 fallback 값
-            """
-            if not is_pretrained:
-                return single_val if (single_val is not None and single_val != "") else "-"
-
-            parts = []
-
-            if pre_val is not None and pre_val != "":
-                parts.append(f"{pre_val} (pretrain)" if add_labels else str(pre_val))
-            if ft_val is not None and ft_val != "":
-                parts.append(f"{ft_val} (finetune)" if add_labels else str(ft_val))
-
-            if not parts:
-                return "-"
-
-            # 둘 다 있으면 "A (pretrain) → B (finetune)" 형식
-            return " → ".join(parts)
-
-        # ========== EPOCHS ==========
-        pretrain_epochs = training.get("pretrain_epochs")
-        finetune_epochs = training.get("finetune_epochs")
-        epochs = training.get("epochs")
-
-        show_param(
-            "Epochs",
-            format_stage_value(pretrain_epochs, finetune_epochs, single_val=epochs)
-        )
-
-        # ========== BATCH SIZE ==========
-        pretrain_bs = training.get("pretrain_batch_size")
-        finetune_bs = training.get("finetune_batch_size")
-        batch_size = training.get("batch_size")
-
-        show_param(
-            "Batch Size",
-            format_stage_value(pretrain_bs, finetune_bs, single_val=batch_size)
-        )
-
-        # ========== LEARNING RATE ==========
-        pretrain_lr = training.get("pretrain_learning_rate")
-        finetune_lr = training.get("finetune_learning_rate")
-        lr = training.get("learning_rate") or training.get("lr")
-
-        show_param(
-            "Learning Rate",
-            format_stage_value(pretrain_lr, finetune_lr, single_val=lr)
-        )
-
-        # ========== LOSS FUNCTION ==========
-        pretrain_loss = training.get("pretrain_loss")
-        finetune_loss = training.get("finetune_loss")
-        loss = training.get("loss")
-
-        show_param(
-            "Loss Function",
-            format_stage_value(pretrain_loss, finetune_loss, single_val=loss)
-        )
-
-        # ========== OPTIMIZER / SCHEDULER / DEVICE ==========
-        optimizer = training.get("optimizer")
-        show_param("Optimizer", optimizer if optimizer else "-")
-
-        scheduler = training.get("scheduler")
-        show_param("Scheduler", scheduler if scheduler else "-")
-
-        device = training.get("device")
-        show_param("Device", device if device else "-")
-
-
-
-        # -------------------------
-        # PARAM COUNT (unchanged)
+        # PARAM COUNT (enhanced)
         # -------------------------
         total_params = None
         param_error = None
+        notes = None
 
-        model_class_name = model_info.get("class_name")
 
         if model_class_name:
             try:
-                resp = requests.get(
-                    f"{API_URL}/param_count",
-                    params={"filename": id2name[selected_id]},
+                resp = requests.post(
+                    f"{API_URL}/param_count_enhanced",
+                    data={
+                        "filename": id2name[selected_id],
+                        "class_name": model_class_name,
+                    },
                     timeout=10,
                 )
+
                 data = resp.json()
 
-                if data.get("error"):
-                    param_error = data["error"]
-                else:
-                    cls_info = data.get("results", {}).get(model_class_name)
-                    if cls_info:
-                        total_params = cls_info.get("total_params")
-                        param_error = cls_info.get("error")
-                    else:
-                        param_error = f"No param info for class '{model_class_name}'."
+                # merged 값 (param_counter + llm 병합)
+                total_params = data.get("merged")
+                notes = data.get("notes")
+
+                # 기본 API 에러 처리
+                if total_params is None:
+                    param_error = "Failed to compute parameters."
+
             except Exception as e:
                 param_error = str(e)
+
         else:
             param_error = "Model class name not found in summary."
 
+
+        # -------------------------
+        # UI 표시
+        # -------------------------
         if total_params is not None:
             show_param("Total Parameters", f"{int(total_params):,}")
         else:
             show_param("Total Parameters", "N/A")
-            if param_error:
-                st.caption(f"Param count error: {param_error}")
+
+        # notes 출력 (LLM reasoning 등)
+        if notes:
+            st.caption(notes)
+
+        if param_error:
+            st.caption(f"Param count error: {param_error}")
+
+
+        def has_meaningful_values(stage_dict):
+            if not stage_dict:
+                return False
+            # 값이 None이 아닌 항목이 하나라도 있으면 의미 있음
+            return any(v not in (None, "null") for v in stage_dict.values())
+
+        stages = summary.get("training", {}).get("stages", {})
+        overall = summary.get("training", {}).get("overall", {})
+
+        # 표시할 탭 목록 구성
+        tab_labels = []
+        tab_contents = []
+
+        # # Always include Overall
+        # tab_labels.append("Overall")
+        # tab_contents.append(overall)
+
+        if has_meaningful_values(stages.get("pretrain", {})):
+            tab_labels.append("Pretrain")
+            tab_contents.append(stages.get("pretrain"))
+
+        if has_meaningful_values(stages.get("train", {})):
+            tab_labels.append("Train")
+            tab_contents.append(stages.get("train"))
+
+        if has_meaningful_values(stages.get("finetune", {})):
+            tab_labels.append("Finetune")
+            tab_contents.append(stages.get("finetune"))
+
+        # 탭 생성 (동적)
+        tabs = st.tabs(tab_labels)
+
+        def render_stage(stage_dict):
+            if not stage_dict:
+                st.info("No parameters detected for this stage.")
+                return
+
+            for key, val in stage_dict.items():
+                st.markdown(
+                    f"""
+                    <div style="display: flex; justify-content: space-between; padding:6px 12px;
+                                border: 1px solid #eee; border-radius:6px; margin-bottom:6px;">
+                        <strong>{key}</strong>
+                        <span>{val}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+        # 각 탭에 내용 렌더링
+        for tab, content in zip(tabs, tab_contents):
+            with tab:
+                render_stage(content)
+        
 
 
     st.markdown("---")

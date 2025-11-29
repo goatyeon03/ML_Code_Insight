@@ -1,286 +1,291 @@
 import ast
-import re
 
-class RobustMLParser(ast.NodeVisitor):
+
+class MLCodeParser(ast.NodeVisitor):
+    """
+    V3: AST는 '값' + '학습 흐름 단서(training flow signals)'를 추출한다.
+    Stage(pretrain/train/finetune) 판단은 하지 않으며,
+    판단을 위한 신호를 LLM에 제공한다.
+    """
 
     def __init__(self):
-        # 최종 summary
         self.summary = {
+            "dataset": {},
             "model": {},
             "training": {
-                "pretrained": False
+                "overall": {},
+                "stages": {
+                    "pretrain": {},
+                    "train": {},
+                    "finetune": {}
+                }
             },
-            "dataset": {},
-            "misc": {}
+            "training_flow": {
+                "has_training_loop": False,
+                "loop_epoch_var": None,
+                "has_backward": False,
+                "has_optimizer_step": False,
+                "has_model_train": False,
+                "has_pretrained_load": False,
+            }
         }
 
-        # AST 기반 후보 저장
-        self.pretrain_epochs = []
-        self.finetune_epochs = []
-        self.pretrain_bs = []
-        self.finetune_bs = []
-        self.pretrain_lr = []
-        self.finetune_lr = []
-        self.pretrain_loss = []
-        self.finetune_loss = []
+        self.variables = {}
+        self.current_loop_vars = []   # for detecting training loop
 
-    # =======================================
-    # Model Class
-    # =======================================
+    # ---------------------------------------------------------
+    # Utility
+    # ---------------------------------------------------------
+    def _resolve(self, value):
+        if isinstance(value, ast.Constant):
+            return value.value
+        if isinstance(value, ast.Name):
+            return self.variables.get(value.id)
+        if isinstance(value, (int, float, str)):
+            return value
+        return None
+    
     def visit_ClassDef(self, node):
-        try:
-            for base in node.bases:
-                base_name = getattr(base, "id", None) or getattr(base, "attr", None)
-                if base_name == "Module":
-                    self.summary["model"]["class_name"] = node.name
-        except:
-            pass
+        print(f"[DEBUG] Found class: {node.name}")
+
+        class_name = node.name
+        is_model_class = False
+
+        # 상속 구조 디버깅
+        for base in node.bases:
+            try:
+                print(f"[DEBUG]   base: {ast.unparse(base)}")
+            except:
+                pass
+
+            if isinstance(base, ast.Attribute) and base.attr == "Module":
+                print("[DEBUG]   → inherits nn.Module via Attribute")
+                is_model_class = True
+            if isinstance(base, ast.Name) and base.id == "Module":
+                print("[DEBUG]   → inherits nn.Module via Name")
+                is_model_class = True
+
+        # __init__ 내부 확인
+        for body_item in node.body:
+            if isinstance(body_item, ast.FunctionDef) and body_item.name == "__init__":
+                print(f"[DEBUG]   Checking __init__ of {class_name}")
+                try:
+                    text = ast.unparse(body_item)
+                    if any(x in text for x in ["nn.Conv", "nn.Linear", "nn.BatchNorm"]):
+                        print(f"[DEBUG]   → {class_name} has NN layers ⇒ model class detected")
+                        is_model_class = True
+                except:
+                    pass
+
+        if is_model_class:
+            print(f"[DEBUG] >>> MODEL CLASS DETECTED: {class_name}")
+            self.summary["model"]["name"] = class_name
+
         self.generic_visit(node)
 
-    
 
 
-    # =======================================
-    # AST 기반 기본 변수 추출
-    # =======================================
+    # ---------------------------------------------------------
+    # Variable assignment
+    # ---------------------------------------------------------
     def visit_Assign(self, node):
-        try:
-            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
-            if not targets:
+        value = None
+
+        # 기존 device 변수 처리
+        if isinstance(node.value, ast.Constant):
+            value = node.value.value
+        elif isinstance(node.value, ast.Name):
+            value = self.variables.get(node.value.id)
+        elif isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Attribute):
+                if node.value.func.attr == "device":
+                    if node.value.args:
+                        value = self._resolve(node.value.args[0])
+
+        # 모델 할당 여부 출력
+        if isinstance(node.value, ast.Call):
+            try:
+                call_repr = ast.unparse(node.value)
+                print(f"[DEBUG] Assign Call: {call_repr}")
+            except:
+                pass
+        
+        LOSS_CLASSES = {
+            "CrossEntropyLoss",
+            "MSELoss",
+            "L1Loss",
+            "SmoothL1Loss",
+        }
+
+        OPTIMIZER_CLASSES = {
+            "Adam", "AdamW", "SGD", "RMSprop"
+        }
+
+
+        # 모델 생성 감지 (Name 기반)
+        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
+
+            class_name = node.value.func.id
+
+            # Loss / Optimizer 는 model class 로 취급하면 안됨
+            if class_name in LOSS_CLASSES:
+                return
+            if class_name in OPTIMIZER_CLASSES:
                 return
 
-            # literal만 처리
-            if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, (int, float, str))):
+            print(f"[DEBUG] Model instantiation detected (Name): {class_name}")
+            self.summary["model"]["name"] = class_name
+
+
+        # 모델 생성 감지 (Attribute 기반)
+        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
+
+            class_name = node.value.func.attr
+
+            if class_name in LOSS_CLASSES:
+                return
+            if class_name in OPTIMIZER_CLASSES:
                 return
 
-            val = node.value.value
-
-            for name in targets:
-                lname = name.lower()
-
-                # --- helper: SSL / pretrain 변수 감지 ---
-                def _is_pretrain_var(name: str):
-                    name_up = name.upper()
-                    name_low = name.lower()
-                    return (
-                        name_up.endswith("_SSL")
-                        or "ssl" in name_low
-                        or "pretrain" in name_low
-                        or "contrastive" in name_low
-                    )
-
-                if "epoch" in lname:
-                    if _is_pretrain_var(name):
-                        self.pretrain_epochs.append(val)
-                    else:
-                        self.finetune_epochs.append(val)
-
-                if ("batch" in lname) or lname.startswith("bs") or lname.endswith("bs"):
-                    if _is_pretrain_var(name):
-                        self.pretrain_bs.append(val)
-                    else:
-                        self.finetune_bs.append(val)
-
-                if "lr" in lname or "learning" in lname:
-                    if isinstance(val, (int, float)):
-                        if _is_pretrain_var(name):
-                            self.pretrain_lr.append(val)
-                        else:
-                            self.finetune_lr.append(val)
-
-
-                # -------- Loss 분리 -------
-                if "loss" in lname or "criterion" in lname:
-                    if isinstance(val, str):
-                        if ("pretrain" in lname) or ("ssl" in lname):
-                            self.pretrain_loss.append(val)
-                        else:
-                            self.finetune_loss.append(val)
-
-        except:
-            pass
+            print(f"[DEBUG] Model instantiation detected (Attribute): {class_name}")
+            self.summary["model"]["name"] = class_name
+        
 
         self.generic_visit(node)
 
-    # =======================================
-    # Dataset detection
-    # =======================================
+
+    # ---------------------------------------------------------
+    # Call detection: optimizer, loss, backward, step, load weights
+    # ---------------------------------------------------------
     def visit_Call(self, node):
+        # ---------- Optimizer detection ----------
         try:
-            fn = ast.unparse(node.func)
-            if "DataLoader" in fn:
-                self.summary["dataset"]["loader"] = fn
-            if "Dataset" in fn:
-                self.summary["dataset"]["dataset_class"] = fn
+            if isinstance(node.func, ast.Attribute):
+                if node.func.attr in ["Adam", "AdamW", "SGD", "RMSprop"]:
+                    self.summary["training"]["overall"]["optimizer"] = node.func.attr
+        except:
+            pass
+
+        # ---------- Loss detection ----------
+        try:
+            if isinstance(node.func, ast.Name):
+                if node.func.id in ["CrossEntropyLoss", "MSELoss", "L1Loss", "SmoothL1Loss"]:
+                    self.summary["training"]["overall"]["loss"] = node.func.id
+        except:
+            pass
+
+        # ---------- backward() detection ----------
+        try:
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "backward":
+                self.summary["training_flow"]["has_backward"] = True
+        except:
+            pass
+
+        # ---------- optimizer.step() detection ----------
+        try:
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "step":
+                self.summary["training_flow"]["has_optimizer_step"] = True
+        except:
+            pass
+
+        # ---------- model.train() detection ----------
+        try:
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "train":
+                self.summary["training_flow"]["has_model_train"] = True
+        except:
+            pass
+
+        # ---------- pretrained model load detection ----------
+        try:
+            if isinstance(node.func, ast.Attribute):
+                if node.func.attr in ["load_state_dict", "load_weights"]:
+                    self.summary["training_flow"]["has_pretrained_load"] = True
+        except:
+            pass
+
+        # torch.load(...)
+        try:
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "load":
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == "torch":
+                    self.summary["training_flow"]["has_pretrained_load"] = True
         except:
             pass
 
         self.generic_visit(node)
 
+    # ---------------------------------------------------------
+    # For loop detection (training loop)
+    # ---------------------------------------------------------
+    def visit_For(self, node):
+        # Detect loops over range(EPOCHS)
+        is_training_loop = False
 
-# ============================================================
-# Regex 기반 하이퍼파라미터 추출 
-# (대문자/약어/camelCase/prefix/suffix 모두 감지)
-# ============================================================
-def _regex_extract(text, summary):
+        if isinstance(node.iter, ast.Call) and isinstance(node.iter.func, ast.Name):
+            if node.iter.func.id == "range":
+                is_training_loop = True
+                # Try extracting epoch variable
+                if isinstance(node.target, ast.Name):
+                    self.summary["training_flow"]["loop_epoch_var"] = node.target.id
 
-    # --------------------
-    # Learning rate
-    # --------------------
-    lr_regex = r"(?i)\b[a-zA-Z0-9_\.]*lr[a-zA-Z0-9_]*\s*=\s*([0-9\.eE-]+)"
-    for m in re.finditer(lr_regex, text):
-        summary["training"].setdefault("_lr_candidates", []).append(m.group(1))
+        if is_training_loop:
+            self.summary["training_flow"]["has_training_loop"] = True
 
-    # --------------------
-    # Batch size
-    # --------------------
-    batch_patterns = [
-        r"(?i)\b[a-zA-Z0-9_\.]*batch[a-zA-Z0-9_]*\s*=\s*(\d+)",
-        r"(?i)\b[a-zA-Z0-9_\.]*bs[a-zA-Z0-9_]*\s*=\s*(\d+)",
-    ]
-    for pat in batch_patterns:
-        for m in re.finditer(pat, text):
-            summary["training"].setdefault("_bs_candidates", []).append(int(m.group(1)))
-
-    # --------------------
-    # Loss
-    # --------------------
-    m = re.search(r"(?i)nn\.(\w+Loss)", text)
-    if m:
-        summary["training"]["loss"] = m.group(1)
-
-    crit = re.search(r"(?i)\b(loss|criterion|loss_fn)\b\s*=\s*(\w+)", text)
-    if crit:
-        summary["training"]["loss"] = crit.group(2)
-
-    # --------------------
-    # Optimizer
-    # --------------------
-    m = re.search(r"(?i)(?:torch\.)?optim\.(\w+)", text)
-    if m:
-        summary["training"]["optimizer"] = m.group(1)
-
-    # --------------------
-    # Device
-    # --------------------
-    m = re.search(r"(?i)device\s*=\s*['\"]([\w:]+)['\"]", text)
-    if m:
-        summary["training"]["device"] = m.group(1)
-
-    m = re.search(r"\.to\(['\"](cuda.*?|cpu)['\"]\)", text)
-    if m:
-        summary["training"]["device"] = m.group(1)
-
-    # --------------------
-    # Pretrained 여부
-    # --------------------
-    pretrained_patterns = [
-        r"load_state_dict",
-        r"from_pretrained",
-        r"torch\.load",
-        r"load_weights",
-        r"load_pretrained",
-        r"\bpretrain\b",
-        r"ssl_train",
-        r"run_ssl",
-        r"ssl_"
-    ]
-    for p in pretrained_patterns:
-        if re.search(p, text):
-            summary["training"]["pretrained"] = True
-            break
-
-    return summary
-
-
-# ============================================================
-# Public API
-# ============================================================
-def summarize_code(filepath: str):
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            src = f.read()
-    except Exception as e:
-        return {"error": f"Failed to read file: {e}"}
-
-    parser = RobustMLParser()
-
-    # AST 파싱
-    try:
-        tree = ast.parse(src)
-        parser.visit(tree)
-    except:
-        pass
-
-    summary = parser.summary
-    summary = _regex_extract(src, summary)
-
-    T = summary["training"]
-
-    # ---------------------------
-    # Epochs (two-phase handling)
-    # ---------------------------
-    if T["pretrained"]:
-        if parser.pretrain_epochs:
-            T["pretrain_epochs"] = parser.pretrain_epochs[-1]
-        if parser.finetune_epochs:
-            T["finetune_epochs"] = parser.finetune_epochs[-1]
-    else:
-        if parser.finetune_epochs:
-            T["epochs"] = parser.finetune_epochs[-1]
-
-    # ---------------------------
-    # Batch size (two-phase)
-    # ---------------------------
-    if T["pretrained"]:
-        if parser.pretrain_bs:
-            T["pretrain_batch_size"] = parser.pretrain_bs[-1]
-        if parser.finetune_bs:
-            T["finetune_batch_size"] = parser.finetune_bs[-1]
-    else:
-        if parser.finetune_bs:
-            T["batch_size"] = parser.finetune_bs[-1]
-
-    # Regex batch도 fallback
-    bs_candidates = T.get("_bs_candidates")
-    if bs_candidates and "batch_size" not in T and not T["pretrained"]:
-        T["batch_size"] = bs_candidates[-1]
-
-    # ---------------------------
-    # Learning rate (two-phase)
-    # ---------------------------
-    if T["pretrained"]:
-        if parser.pretrain_lr:
-            T["pretrain_learning_rate"] = parser.pretrain_lr[-1]
-        if parser.finetune_lr:
-            T["finetune_learning_rate"] = parser.finetune_lr[-1]
-    else:
-        if parser.finetune_lr:
-            T["learning_rate"] = parser.finetune_lr[-1]
-
-    lr_candidates = T.get("_lr_candidates")
-    if lr_candidates and "learning_rate" not in T and not T["pretrained"]:
-        T["learning_rate"] = lr_candidates[-1]
-
-    # ---------------------------
-    # Loss (two-phase)
-    # ---------------------------
-    if T["pretrained"]:
-        if parser.pretrain_loss:
-            T["pretrain_loss"] = parser.pretrain_loss[-1]
-        if parser.finetune_loss:
-            T["finetune_loss"] = parser.finetune_loss[-1]
-    else:
-        if parser.finetune_loss:
-            T["loss"] = parser.finetune_loss[-1]
+        self.generic_visit(node)
     
-    # If SSL code detected, assign contrastive loss to pretrain
-    if "contrastive_loss" in src or "nt_xent" in src:
-        summary["training"]["pretrain_loss"] = "contrastive_loss"
+    
 
 
-    # cleanup temporary fields
-    T.pop("_bs_candidates", None)
-    T.pop("_lr_candidates", None)
+    # ---------------------------------------------------------
+    # Finalize: extract patterns like lr, batch, epochs, device
+    # ---------------------------------------------------------
+    def finalize(self):
+        print("[DEBUG] FINALIZING VARIABLES:")
+        for k, v in self.variables.items():
+            print(f"  {k} = {v}")
 
-    return summary
+        overall = self.summary["training"]["overall"]
+
+        print("[DEBUG] Before finalize overall:", overall)
+
+        # epochs
+        for k, v in self.variables.items():
+            if "epoch" in k.lower():
+                print(f"[DEBUG] epoch var detected: {k} = {v}")
+                overall["epochs"] = v
+
+        # lr
+        for k, v in self.variables.items():
+            if "lr" in k.lower() or "learning_rate" in k.lower():
+                print(f"[DEBUG] lr var detected: {k} = {v}")
+                overall["learning_rate"] = v
+
+        # batch
+        for k, v in self.variables.items():
+            if "batch" in k.lower() or "bs" in k.lower():
+                print(f"[DEBUG] batch var detected: {k} = {v}")
+                overall["batch_size"] = v
+
+        # device
+        for k, v in self.variables.items():
+            if "device" in k.lower():
+                print(f"[DEBUG] device var detected: {k} = {v}")
+                overall["device"] = v
+
+        print("[DEBUG] After finalize overall:", overall)
+
+
+    # ---------------------------------------------------------
+    def parse(self, source):
+        tree = ast.parse(source)
+        self.visit(tree)
+        self.finalize()
+        print("[DEBUG] FINAL SUMMARY:", self.summary)
+        return self.summary
+
+
+def summarize_code(filepath):
+    with open(filepath, "r", encoding="utf-8") as f:
+        src = f.read()
+
+    parser = MLCodeParser()
+    return parser.parse(src)
