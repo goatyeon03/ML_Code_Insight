@@ -30,7 +30,44 @@ def render_project_sidebar():
 
     st.sidebar.markdown("### 📁 Projects")
 
-    # Load project list
+    # --------------------------------------------
+    # 🔥 0. 프로젝트 생성 모드 처리 (최우선)
+    # --------------------------------------------
+    if st.session_state.get("pending_create_project"):
+        # 프로젝트 생성 UI만 렌더링
+        new_name = st.sidebar.text_input("New Project Name", key="new_project_name")
+
+        colA, colB = st.sidebar.columns([1, 1])
+
+        # Create 버튼
+        if colA.button("Create", key="btn_create_project_confirm"):
+            if new_name.strip():
+                res = create_project_api(user_id, new_name.strip())
+                if "error" in res:
+                    st.sidebar.error(f"Failed: {res['error']}")
+                else:
+                    new_pid = res["project_id"]
+                    st.sidebar.success("Project created!")
+
+                    # 프로젝트 선택
+                    st.session_state["selected_project"] = new_pid
+                    # URL query param 갱신
+                    st.query_params["project"] = new_pid
+
+                st.session_state["pending_create_project"] = False
+                st.rerun()
+
+        # Cancel 버튼
+        if colB.button("Cancel", key="btn_create_project_cancel"):
+            st.session_state["pending_create_project"] = False
+            st.rerun()
+
+        # 프로젝트 생성 모드일 때는 아래 코드 절대 실행되지 않도록 return
+        return
+
+    # --------------------------------------------
+    # 1. 프로젝트 목록 로드
+    # --------------------------------------------
     conn = get_conn()
     cur = conn.cursor()
     rows = cur.execute("""
@@ -44,19 +81,22 @@ def render_project_sidebar():
     project_list = {name: pid for (pid, name) in rows}
     names = list(project_list.keys())
 
-    # Current selected project
+    # 현재 선택된 프로젝트
     current_pid = st.session_state.get("selected_project")
 
-    # Selectbox options
+    # Selectbox 옵션
     options = ["(Select a project)", "➕ Create New Project"] + names
 
-    # Selectbox default index
+    # 기본값
     if current_pid in project_list.values():
         current_name = [n for n, p in project_list.items() if p == current_pid][0]
         default_index = options.index(current_name)
     else:
         default_index = 0
 
+    # --------------------------------------------
+    # 2. Selectbox 표시
+    # --------------------------------------------
     selected = st.sidebar.selectbox(
         "Select Project",
         options,
@@ -65,46 +105,31 @@ def render_project_sidebar():
         label_visibility="collapsed",
     )
 
-    # Create New Project
+    # --------------------------------------------
+    # 3. 새로운 프로젝트 생성 선택 시
+    # --------------------------------------------
     if selected == "➕ Create New Project":
-        new_name = st.sidebar.text_input("New Project Name", key="new_project_name")
-        colA, colB = st.sidebar.columns([1, 1])
+        st.session_state["pending_create_project"] = True
+        st.rerun()
+        return
 
-        if colA.button("Create", key="btn_create_project"):
-            if new_name.strip():
-                res = create_project_api(user_id, new_name.strip())
-                if "error" in res:
-                    st.sidebar.error(f"Failed: {res['error']}")
-                else:
-                    new_pid = res["project_id"]
-                    st.sidebar.success("Project created!")
-
-                    st.session_state["selected_project"] = new_pid
-
-                    # 🔥 URL query param 업데이트
-                    st.query_params["project"] = new_pid
-
-                    st.rerun()
-
-        if colB.button("Cancel", key="btn_cancel_create_project"):
-            st.rerun()
-
-        return None
-
-    # No project selected
+    # --------------------------------------------
+    # 4. 선택 없음
+    # --------------------------------------------
     if selected == "(Select a project)":
         st.session_state["selected_project"] = None
         return None
 
-    # Existing project selected
+    # --------------------------------------------
+    # 5. 기존 프로젝트 선택
+    # --------------------------------------------
     pid = project_list[selected]
     st.session_state["selected_project"] = pid
 
-    # 🔥 URL query param 업데이트
+    # URL 쿼리 반영
     st.query_params["project"] = pid
 
     return pid
-
 
 
 # ----------------------------------------------------------
@@ -139,6 +164,7 @@ def render_upload_section(user_id):
     existing_names = {r[0] for r in rows}
     existing_norm = {normalize(n) for n in existing_names}
 
+
     # === 2) FileUploader ===
     uploaded_files = st.sidebar.file_uploader(
         "Upload .py files",
@@ -146,6 +172,7 @@ def render_upload_section(user_id):
         accept_multiple_files=True,
         key=uploader_key
     )
+
 
     if uploaded_files:
 
@@ -157,6 +184,7 @@ def render_upload_section(user_id):
         f = uploaded_files[0]
         uploaded_name = f.name
         uploaded_norm = normalize(uploaded_name)
+
 
         # === CASE A: 중복 아님 → 즉시 업로드 ===
         if uploaded_norm not in existing_norm:
@@ -194,7 +222,7 @@ def render_upload_section(user_id):
             old_text = requests.get(
                 f"{API_URL}/get_file?type=code&filename={fname}"
             ).text
-            new_text = fobj.getvalue().decode("utf-8")
+            new_text = fobj.getbuffer().tobytes().decode("utf-8")   # ✔ pointer-safe
 
             diff = compare_code_text(old_text, new_text)
             changed = diff["added"] or diff["removed"] or diff["modified"]
@@ -228,14 +256,33 @@ def _clear_pending():
     st.session_state["existing_file_list"] = None
 
 
+from io import BytesIO
+
 def _perform_upload(user_id, project_id, f, base_key):
     msg = st.sidebar.empty()
     msg.write(f"⏳ Uploading `{f.name}`...")
 
-    upload_code_api(user_id, project_id, f)
+    # --- 파일 내용을 안전하게 추출 (포인터 소모 안 함) ---
+    content = f.getbuffer().tobytes()
 
-    msg.success(f"✅ Uploaded `{f.name}`")
+    # --- FastAPI 요청 ---
+    files = {"file": (f.name, BytesIO(content), "text/plain")}
+    data = {"user_id": user_id, "project_id": project_id}
+
+    resp = requests.post(
+        f"{API_URL}/upload_code",
+        data=data,
+        files=files,
+        timeout=30,
+    )
+
+    if resp.status_code != 200:
+        msg.error(f"❌ Upload failed: {resp.text}")
+    else:
+        msg.success(f"✅ Uploaded `{f.name}`")
+
     st.session_state["uploader_key"] = base_key + "_reset_" + str(time.time())
+
 
 
 # ----------------------------------------------------------

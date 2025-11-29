@@ -48,29 +48,46 @@ async def upload_code(
     user_id: int = Form(...),
     project_id: int = Form(...),
     file: UploadFile = File(...),
+    override_name: str = Form(None),   # ⭐ 추가
 ):
-    # --- 파일 저장 ---
-    save_path = os.path.join(UPLOAD_CODE, file.filename)
+    # --------------------------
+    # 1) 실제 저장 파일명 결정
+    # --------------------------
+    filename = override_name if override_name else file.filename
+    save_path = os.path.join(UPLOAD_CODE, filename)
+
+    # 파일 저장
     try:
         with open(save_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
     finally:
-        # UploadFile 내부 파일 포인터 닫기
         file.file.close()
 
-    # --- 코드 요약 생성 ---
+    # --------------------------
+    # 2) summary 생성
+    # --------------------------
     from backend.parsers.code_parser import summarize_code
 
     try:
         summary = summarize_code(save_path)
     except Exception as e:
-        # 요약에 실패해도 업로드 자체는 실패로 보는 편이 자연스러워서 500
-        raise HTTPException(status_code=500, detail=f"Failed to summarize code: {e}")
+        summary = {"error": str(e)}
 
+    # summary 구조 보정
+    if not isinstance(summary, dict):
+        summary = {"error": "invalid summary"}
+
+    summary.setdefault("model", {})
+    summary.setdefault("training", {})
+    summary.setdefault("dataset", {})
+    summary.setdefault("misc", {})
+
+    # --------------------------
+    # 3) DB 저장
+    # --------------------------
     conn = get_conn()
     cur = conn.cursor()
     try:
-        # files 테이블 upsert
         cur.execute(
             """
             INSERT INTO files (user_id, filename, filetype, summary_json)
@@ -78,23 +95,21 @@ async def upload_code(
             ON CONFLICT(user_id, filename, filetype)
             DO UPDATE SET summary_json = excluded.summary_json
             """,
-            (user_id, file.filename, json.dumps(summary)),
+            (user_id, filename, json.dumps(summary)),
         )
 
-        # file_id 가져오기
         cur.execute(
             """
             SELECT id FROM files
             WHERE user_id = ? AND filename = ? AND filetype = 'code'
             """,
-            (user_id, file.filename),
+            (user_id, filename),
         )
         row = cur.fetchone()
-        if row is None:
+        if not row:
             raise RuntimeError("Failed to fetch file_id after insert.")
         file_id = row[0]
 
-        # project_files 연결 (중복 방지)
         cur.execute(
             """
             INSERT OR IGNORE INTO project_files (project_id, file_id)
@@ -111,7 +126,7 @@ async def upload_code(
         conn.close()
 
     return {
-        "filename": file.filename,
+        "filename": filename,
         "summary": summary,
         "file_id": file_id,
     }

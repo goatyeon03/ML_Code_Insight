@@ -15,13 +15,13 @@ st.markdown("""
 <style>
 .help-container {
     position: fixed;   /* 화면 전체 기준 고정 */
-    top: 10px;
-    left: 10px;
+    bottom: 20px;
+    right: 20px;
     z-index: 999999;   /* 최상단 */
 }
 
 .help-icon {
-    font-size: 24px;
+    font-size: 30px;
     cursor: default;
 }
 
@@ -31,17 +31,17 @@ st.markdown("""
     transition: opacity 0.2s ease;
 
     position: absolute;
-    top: 32px;
-    left: 0;
+    bottom: 15px;
+    right: 40px;
 
-    width: 270px;
+    width: 300px;
     background: #333;
     color: white;
     padding: 10px 14px;
     border-radius: 6px;
     font-size: 15px;
 }
-.help-container:hover .help-tooltip {
+.help-container:hover .help-tooltip{
     visibility: visible;
     opacity: 1;
 }
@@ -55,7 +55,9 @@ st.markdown("""
         • 코드 파일 업로드 → 자동 분석<br>
         • 결과 JSON 업로드 → 자동 매칭/시각화<br>
         • 리더보드에서 성능 확인<br><br>
+        <div>⭐ 만일 오류가 있다면 uaua1595@naver.com 으로 연락주세요!</div>
     </div>
+    
 </div>
 """, unsafe_allow_html=True)
 

@@ -1,6 +1,4 @@
-# modules/project_dashboard.py  (🔥 최종 안정 버전)
-# 전체 구조 점검 + DB read-only + API write-only
-# -------------------------------------------------------------
+# modules/project_dashboard.py  (수정 버전)
 
 import json
 import pandas as pd
@@ -68,11 +66,8 @@ def render_project_dashboard(project_id: int, user_id: int):
     project_name = row[0] if row else f"Project {project_id}"
     st.title(project_name)
 
-    
-
     # === 코드 파일들 ===
     code_rows = _load_code_files(project_id, user_id)
-
 
     # --- 0) 파일이 없을 때 예시 화면 출력 ---
     if not code_rows:
@@ -116,18 +111,11 @@ def render_project_dashboard(project_id: int, user_id: int):
 
             st.code(json.dumps(example_json, indent=4), language="json")
 
-
-            # st.dataframe(example_json, use_container_width=True)
-
         st.stop()  # 예시 화면을 보여주고 나머지는 렌더링하지 않음
-
-    
 
     # =========================================================
     # 1) Select Code File
     # =========================================================
-    # st.markdown("### 🧠 Select Code File")
-
     if not code_rows:
         st.info("No code files in this project yet.")
         return
@@ -144,7 +132,6 @@ def render_project_dashboard(project_id: int, user_id: int):
 
     st.markdown("### ℹ️ Training Information per Code File")
 
-    # 현재 선택된 파일 ID
     selected_id = st.session_state.get("selected_code_file", code_rows[0][0])
 
     selected_label = st.selectbox(
@@ -163,12 +150,17 @@ def render_project_dashboard(project_id: int, user_id: int):
         st.session_state["selected_code_file"] = selected_id
         st.session_state["model_data"] = None
 
-
     # 선택된 summary_json 불러오기
     raw_summary = [sj for (fid, _, sj) in code_rows if fid == selected_id][0]
     summary = json.loads(raw_summary) if raw_summary else {}
     training = summary.get("training", {})
     model_info = summary.get("model", {})
+
+
+    st.markdown("### 🔍 DEBUG: Training Summary Data")
+    st.json(training)
+
+
 
     # =========================================================
     # 2) Upper Layout: Left = Model Structure / Right = Params
@@ -181,7 +173,6 @@ def render_project_dashboard(project_id: int, user_id: int):
     with col_left:
         st.markdown("#### 🧱 Model Structure")
 
-        # model_data 캐싱
         model_data = st.session_state.get("model_data")
 
         if (st.session_state.get("selected_file_changed", False)) or (model_data is None):
@@ -198,7 +189,6 @@ def render_project_dashboard(project_id: int, user_id: int):
                 st.error(f"Model parsing failed: {e}")
                 model_data = None
 
-        # ---- 모델 구조 렌더링 ----
         if model_data:
             if model_data.get("error"):
                 st.warning(f"⚠️ Parser: {model_data['error']}")
@@ -210,7 +200,7 @@ def render_project_dashboard(project_id: int, user_id: int):
             # Pipeline
             if pipeline:
                 from modules.model_blocks import render_pipeline_graphviz
-                diagram_area = st.empty()  # 🔥 여기가 핵심
+                diagram_area = st.empty()
                 render_pipeline_graphviz(pipeline, models, diagram_area)
 
             # Block Tree
@@ -222,12 +212,11 @@ def render_project_dashboard(project_id: int, user_id: int):
                 render_model_tree(chosen, models)
 
     # -------------------------
-    # (오른쪽) Model Parameters
+    # (오른쪽) Model + Training Parameters (Stage-aware)
     # -------------------------
     with col_right:
         st.markdown("#### ⚙️ Training Parameters")
 
-        # 선택된 summary_json 기반
         def show_param(key, value):
             st.markdown(
                 f"""
@@ -240,19 +229,111 @@ def render_project_dashboard(project_id: int, user_id: int):
                 unsafe_allow_html=True
             )
 
-        # 기본 summary 정보 출력
-        # show_param("Filename", id2name[selected_id])
-        show_param("Model Class", model_info.get("class_name", "-"))
-        show_param("Optimizer", training.get("optimizer", "-"))
-        show_param("Learning Rate", training.get("learning_rate", training.get("lr", "-")))
-        show_param("Batch Size", training.get("batch_size", "-"))
-        show_param("Epochs", training.get("epochs", "-"))
-        show_param("Loss Function", training.get("loss", "-"))
-        show_param("Scheduler", training.get("scheduler", "-"))
-        show_param("Device", training.get("device", "-"))
+        # -------------------------
+        # 🔥 Pretrained 플래그
+        # -------------------------
+        pretrained_raw = training.get("pretrained")
+
+        # 표시용 + 내부 bool 플래그 둘 다 만들기
+        if isinstance(pretrained_raw, bool):
+            is_pretrained = pretrained_raw
+        elif isinstance(pretrained_raw, str):
+            pl = pretrained_raw.strip().lower()
+            if pl in ("yes", "y", "true", "1"):
+                is_pretrained = True
+            elif pl in ("no", "n", "false", "0"):
+                is_pretrained = False
+            else:
+                is_pretrained = False   # 애매하면 False 쪽으로
+        else:
+            is_pretrained = False
+
+        pretrained_str = "Yes" if is_pretrained else "No"
+        show_param("Pretrained", pretrained_str)
 
         # -------------------------
-        # 🔥 총 파라미터 수 계산 (model_data 안 쓰고, filename + class_name 만 사용)
+        # 🔧 공통 포맷터: pretrain / finetune 값 합쳐서 보여주기
+        # -------------------------
+        def format_stage_value(
+            pre_val,
+            ft_val,
+            single_val=None,
+            add_labels=True,
+        ):
+            """
+            - pre_val, ft_val: pretrain/finetune용 값 (None 또는 값)
+            - single_val: pretrain 안 쓰는 경우 fallback 값
+            """
+            if not is_pretrained:
+                return single_val if (single_val is not None and single_val != "") else "-"
+
+            parts = []
+
+            if pre_val is not None and pre_val != "":
+                parts.append(f"{pre_val} (pretrain)" if add_labels else str(pre_val))
+            if ft_val is not None and ft_val != "":
+                parts.append(f"{ft_val} (finetune)" if add_labels else str(ft_val))
+
+            if not parts:
+                return "-"
+
+            # 둘 다 있으면 "A (pretrain) → B (finetune)" 형식
+            return " → ".join(parts)
+
+        # ========== EPOCHS ==========
+        pretrain_epochs = training.get("pretrain_epochs")
+        finetune_epochs = training.get("finetune_epochs")
+        epochs = training.get("epochs")
+
+        show_param(
+            "Epochs",
+            format_stage_value(pretrain_epochs, finetune_epochs, single_val=epochs)
+        )
+
+        # ========== BATCH SIZE ==========
+        pretrain_bs = training.get("pretrain_batch_size")
+        finetune_bs = training.get("finetune_batch_size")
+        batch_size = training.get("batch_size")
+
+        show_param(
+            "Batch Size",
+            format_stage_value(pretrain_bs, finetune_bs, single_val=batch_size)
+        )
+
+        # ========== LEARNING RATE ==========
+        pretrain_lr = training.get("pretrain_learning_rate")
+        finetune_lr = training.get("finetune_learning_rate")
+        lr = training.get("learning_rate") or training.get("lr")
+
+        show_param(
+            "Learning Rate",
+            format_stage_value(pretrain_lr, finetune_lr, single_val=lr)
+        )
+
+        # ========== LOSS FUNCTION ==========
+        pretrain_loss = training.get("pretrain_loss")
+        finetune_loss = training.get("finetune_loss")
+        loss = training.get("loss")
+
+        show_param(
+            "Loss Function",
+            format_stage_value(pretrain_loss, finetune_loss, single_val=loss)
+        )
+
+        # ========== OPTIMIZER / SCHEDULER / DEVICE ==========
+        optimizer = training.get("optimizer")
+        show_param("Optimizer", optimizer if optimizer else "-")
+
+        scheduler = training.get("scheduler")
+        show_param("Scheduler", scheduler if scheduler else "-")
+
+        device = training.get("device")
+        show_param("Device", device if device else "-")
+
+
+
+        # -------------------------
+        # PARAM COUNT (unchanged)
         # -------------------------
         total_params = None
         param_error = None
@@ -268,36 +349,26 @@ def render_project_dashboard(project_id: int, user_id: int):
                 )
                 data = resp.json()
 
-                # 전체 API 에러 처리
                 if data.get("error"):
                     param_error = data["error"]
-
                 else:
-                    # 모델 클래스 이름으로 접근
                     cls_info = data.get("results", {}).get(model_class_name)
-
                     if cls_info:
                         total_params = cls_info.get("total_params")
                         param_error = cls_info.get("error")
                     else:
                         param_error = f"No param info for class '{model_class_name}'."
-
             except Exception as e:
                 param_error = str(e)
         else:
             param_error = "Model class name not found in summary."
 
-
-        # -------------------------
-        # UI 출력
-        # -------------------------
         if total_params is not None:
             show_param("Total Parameters", f"{int(total_params):,}")
         else:
             show_param("Total Parameters", "N/A")
             if param_error:
                 st.caption(f"Param count error: {param_error}")
-
 
 
     st.markdown("---")
@@ -310,7 +381,6 @@ def render_project_dashboard(project_id: int, user_id: int):
     # =========================================================
     # 3) Result Upload (write는 FastAPI에서만)
     # =========================================================
-    
     st.markdown(
         """
     <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin: 10px 0 20px 0;">
@@ -323,7 +393,7 @@ def render_project_dashboard(project_id: int, user_id: int):
                     </span>
                 </li>
                 <li style="margin-bottom: 10px;">The result file must share a prefix with the training script.</li>
-                <li>Matching happens automatically after upload.</li>
+                <li>ex) train_cnn.py ↔ train_cnn_result.json </li>
             </ul>
         </div>
         <!-- RIGHT BOX -->
@@ -336,31 +406,46 @@ def render_project_dashboard(project_id: int, user_id: int):
         unsafe_allow_html=True
     )
 
+    # 🔑 업로더 & 업로드 중복 처리용 키
+    upload_widget_key = f"result_upload_{project_id}_{user_id}"
+    last_files_key = f"last_result_upload_files_{project_id}_{user_id}"
+
     uploads = st.file_uploader(
         " ",
         type=["json"],
         accept_multiple_files=True,
-        key=f"result_upload_{project_id}_{user_id}"
+        key=upload_widget_key
     )
 
-    if uploads:
-        for rf in uploads:
-            msg = st.empty()
-            msg.write(f"⏳ Uploading `{rf.name}` ...")
+    # 업로드가 아예 없는 경우에는 이전 기록 리셋 (같은 파일 이름 다시 업로드 가능하게)
+    if not uploads:
+        st.session_state.pop(last_files_key, None)
 
-            res = upload_result_api(user_id, project_id, rf)
-            if "error" in res:
-                msg.error(f"Upload failed: {res['error']}")
-            else:
-                msg.success(f"Uploaded `{rf.name}`")
-                time.sleep(1.0)
+    if uploads:
+        # 현재 선택된 파일 이름 목록 (정렬해서 순서 영향 제거)
+        current_files = tuple(sorted(f.name for f in uploads))
+        prev_files = st.session_state.get(last_files_key)
+
+        # 이전에 처리한 적 없는 새로운 조합일 때만 업로드 처리
+        if current_files != prev_files:
+            for rf in uploads:
+                msg = st.empty()
+                msg.write(f"⏳ Uploading `{rf.name}` ...")
+
+                res = upload_result_api(user_id, project_id, rf)
+                if "error" in res:
+                    msg.error(f"Upload failed: {res['error']}")
+                else:
+                    msg.success(f"Uploaded `{rf.name}`")
+                time.sleep(0.4)
                 msg.empty()
 
-        # 🔥 DB insert가 끝나기 전에 rerun되면 SELECT에서 안 잡힘
-        time.sleep(0.5)   # <<< 추가 (0.3~0.8 추천)
+            # 이번 조합은 처리 완료로 기록
+            st.session_state[last_files_key] = current_files
 
-        st.rerun()
-
+            # DB 갱신 후 다시 렌더링
+            time.sleep(0.3)
+            st.rerun()
 
     # ---- 1. 코드/결과 파일 목록 가져오기 ----
     conn = get_conn()
@@ -379,14 +464,13 @@ def render_project_dashboard(project_id: int, user_id: int):
         WHERE pf.project_id=? AND f.user_id=? AND f.filetype='result'
     """, conn, params=(project_id, user_id))
 
-
     code_files = df_codes["filename"].tolist()
     result_files = df_results["filename"].tolist()
 
     def normalize_prefix(name: str):
         base = name.rsplit(".", 1)[0]
-        base = base.replace("_result", "")  # 결과 suffix 제거
-        base = base.replace("_output", "")  # 필요하면 추가
+        base = base.replace("_result", "")
+        base = base.replace("_output", "")
         return base
 
     code_prefixes = {normalize_prefix(cf) for cf in code_files}
@@ -397,8 +481,6 @@ def render_project_dashboard(project_id: int, user_id: int):
         if normalize_prefix(cf) not in result_prefixes
     ]
 
-
-    # ---- 2. 업로드 박스 위에 경고 메시지 표시 ----
     if unmatched_codes:
         st.warning(
             "⚠️ Some code files do not have matching result files:\n\n" +
@@ -414,76 +496,143 @@ def render_project_dashboard(project_id: int, user_id: int):
         WHERE pf.project_id=? AND f.user_id=? AND f.filetype='result'
         ORDER BY f.uploaded_at DESC
     """, conn2, params=(project_id, user_id))
-    conn2.close()     # 🔥 바로 닫기
-
-    # if df_results.empty:
-    #     st.info("No result files in this project.")
-    #     st.stop()
+    conn2.close()
 
     code_files = [fname for (_, fname, _) in code_rows]
     result_files = df_results["filename"].tolist()
 
     pairs = match_code_and_results(code_files, result_files)
 
-    # if not pairs:
-    #     st.warning("No matched code-result pairs found.")
-    #     st.stop()
-
     metric_records = []
 
     # 🔥 페어별 Accordion UI
     for code_name, result_list in pairs.items():
-
         with st.expander(f"{code_name}", expanded=False):
-
             for rname in result_list:
                 st.markdown(f"#### 📄 {rname}")
 
                 row = df_results[df_results["filename"] == rname].iloc[0]
                 preview = json.loads(row["preview_json"])
-
                 df = pd.DataFrame(preview) if isinstance(preview, list) else pd.DataFrame([preview])
 
                 metric_cols = [c for c in df.columns 
                             if c.lower() not in ["epoch", "step", "iteration"]]
 
+                # metric 그룹화
                 groups = group_metrics(metric_cols)
-                tabs = st.tabs(["ACC", "F1", "Loss/MSE", "Other"])
 
-                # ---- ACC TAB ----
-                with tabs[0]:
-                    if groups["acc"]:
-                        dfa = df[["epoch"] + groups["acc"]]
-                        melt = dfa.melt("epoch", groups["acc"], "Metric", "Value")
-                        fig = px.line(melt, x="epoch", y="Value", color="Metric", markers=True)
-                        st.plotly_chart(fig, use_container_width=True)
+                # 탭 구성
+                tabs = st.tabs(["Loss", "Classification", "Regression", "Other"])
 
-                # ---- F1 TAB ----
+                # ------------------------------------
+                # 🔷 1) Classification Tab
+                # ------------------------------------
                 with tabs[1]:
-                    if groups["f1"]:
-                        dff = df[["epoch"] + groups["f1"]]
-                        melt = dff.melt("epoch", groups["f1"], "Metric", "Value")
-                        fig = px.line(melt, x="epoch", y="Value", color="Metric", markers=True)
+                    acc_cols = groups["acc"]
+                    f1_cols = groups["f1"]
+                    
+                    # ACC
+                    if acc_cols:
+                        dfa = df[["epoch"] + acc_cols]
+                        melt = dfa.melt("epoch", acc_cols, "Metric", "Value")
+                        fig = px.line(melt, x="epoch", y="Value", color="Metric",
+                                    markers=True, title="Accuracy")
                         st.plotly_chart(fig, use_container_width=True)
 
-                # ---- LOSS TAB ----
+                    # F1
+                    if f1_cols:
+                        dff = df[["epoch"] + f1_cols]
+                        melt = dff.melt("epoch", f1_cols, "Metric", "Value")
+                        fig = px.line(melt, x="epoch", y="Value", color="Metric",
+                                    markers=True, title="F1 Score")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    if not acc_cols and not f1_cols:
+                        st.info("No classification metrics found.")
+
+                # ------------------------------------
+                # 🔶 2) Loss Tab  (loss만 전담)
+                # ------------------------------------
+                with tabs[0]:
+
+                    loss_cols = [m for m in metric_cols if "loss" in m.lower()]
+                    
+                    # train/val prefix만
+                    selected = [
+                        c for c in loss_cols
+                        if c.startswith("train_") or c.startswith("val_")
+                    ]
+
+                    if selected:
+                        dfx = df[["epoch"] + selected]
+                        melt = dfx.melt("epoch", selected, "Metric", "Value")
+                        fig = px.line(
+                            melt, x="epoch", y="Value", color="Metric", markers=True,
+                            title="Loss"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No train/val loss metrics found.")
+
+                # ------------------------------------
+                # 🔶 3) Regression Tab (mse/mae/rmse/r2)
+                # ------------------------------------
                 with tabs[2]:
-                    if groups["loss"]:
-                        dfl = df[["epoch"] + groups["loss"]]
-                        melt = dfl.melt("epoch", groups["loss"], "Metric", "Value")
-                        fig = px.line(melt, x="epoch", y="Value", color="Metric", markers=True)
+
+                    # Loss는 제거하고 regression metric만
+                    groups_reg = {
+                        "mse":  [m for m in metric_cols if "mse"  in m.lower()],
+                        "mae":  [m for m in metric_cols if "mae"  in m.lower()],
+                        "rmse": [m for m in metric_cols if "rmse" in m.lower()],
+                        "r2":   [m for m in metric_cols if "r2"   in m.lower()],
+                    }
+
+                    def select_train_val(cols):
+                        return [
+                            c for c in cols
+                            if c.startswith("train_") or c.startswith("val_")
+                        ]
+
+                    drew_any_graph = False
+
+                    for metric_name, cols in groups_reg.items():
+                        selected = select_train_val(cols)
+                        if not selected:
+                            continue
+
+                        dfx = df[["epoch"] + selected]
+                        melt = dfx.melt("epoch", selected, "Metric", "Value")
+
+                        fig = px.line(
+                            melt, x="epoch", y="Value", color="Metric", markers=True,
+                            title=f"{metric_name.upper()} (train + val)"
+                        )
                         st.plotly_chart(fig, use_container_width=True)
 
-                # ---- OTHER TAB ----
+                        drew_any_graph = True
+
+                    if not drew_any_graph:
+                        st.info("No regression metrics (train/val) available.")
+
+                # ------------------------------------
+                # 🔘 4) Other Tab
+                # ------------------------------------
                 with tabs[3]:
                     if groups["other"]:
                         dfo = df[["epoch"] + groups["other"]]
                         melt = dfo.melt("epoch", groups["other"], "Metric", "Value")
-                        fig = px.line(melt, x="epoch", y="Value", color="Metric", markers=True)
+                        fig = px.line(melt, x="epoch", y="Value", color="Metric",
+                                    markers=True, title="Other Metrics")
                         st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No other metrics.")
 
-                # 최종 값 기록
+                
+                # ------------------------------------
+                # 최종 값 기록 (metric_records 축적)
+                # ------------------------------------
                 final_row = df.iloc[-1]
+
                 for m in metric_cols:
                     metric_records.append({
                         "Code File": code_name,
@@ -492,49 +641,40 @@ def render_project_dashboard(project_id: int, user_id: int):
                         "Final Value": final_row[m]
                     })
 
+
     # =========================================================
-    # 5) Leaderboard Table
+    # 5) Final Performance Leaderboard (TEST ONLY)
     # =========================================================
-
-    def is_test_metric(m):
-        return m.lower().startswith("test_")
-
-    def is_val_metric(m):
-        return m.lower().startswith("val_")
-
     st.markdown("---")
     st.markdown("### 🏁 Final Performance Leaderboard")
-    st.caption("- Based on the final epoch metrics from the matched result files.  " \
-    "\n- Test metrics are considered first; If no test metrics are available, validation metrics are used as the primary criteria.  " \
-    "\n- The results are automatically sorted by performance.")
+    st.caption(
+        "- Based only on **Test Metrics** from the matched result files.  "
+        "\n- Metrics from the final epoch are used.  "
+        "\n- Sorted automatically by metric direction (higher or lower is better)."
+    )
 
-    # 1) test metric만 우선 선택
-    test_rows = [rec for rec in metric_records if is_test_metric(rec["Metric"])]
+    # test metric 필터링
+    test_rows = [
+        rec for rec in metric_records
+        if rec["Metric"].lower().startswith("test_")
+    ]
 
-    if test_rows:
-        filtered_records = test_rows
+    if not test_rows:
+        st.info("No test metrics available. Please upload result files containing test_* metrics.")
     else:
-        # 2) val metric만 선택 (train 제외)
-        val_rows = [rec for rec in metric_records if is_val_metric(rec["Metric"])]
-        filtered_records = val_rows
-
-    # 🔥 필터링된 metric만 사용
-    if filtered_records:
-        df_leader = pd.DataFrame(filtered_records)
-
-        # 중복 제거
+        df_leader = pd.DataFrame(test_rows)
         df_leader = df_leader.drop_duplicates(
             subset=["Code File", "Result File", "Metric"]
         )
 
-        # 성능 기준 판별
+        # metric 방향 정의
         def metric_direction(m):
             ml = m.lower()
-            if "acc" in ml or "f1" in ml:
+            if "acc" in ml or "f1" in ml or "r2" in ml:
                 return "max"
             if "loss" in ml or "mse" in ml or "rmse" in ml or "mae" in ml:
                 return "min"
-            return "max"  # safe default
+            return "max"
 
         df_leader["SortDir"] = df_leader["Metric"].apply(metric_direction)
         df_leader["RankValue"] = df_leader.apply(
@@ -544,10 +684,8 @@ def render_project_dashboard(project_id: int, user_id: int):
 
         df_leader = df_leader.sort_values("RankValue", ascending=False)
 
-        # 🔥 Metric 종류별로 분리 (여기만 변경됨)
-        metric_types = sorted(df_leader["Metric"].unique())
-
-        for m in metric_types:
+        # metric 종류별로 나누어 표시
+        for m in df_leader["Metric"].unique():
             st.markdown(f"#### 📌 Performance : **{m}**")
 
             sub = df_leader[df_leader["Metric"] == m]
@@ -556,8 +694,3 @@ def render_project_dashboard(project_id: int, user_id: int):
                 sub[["Code File", "Result File", "Metric", "Final Value"]].reset_index(drop=True),
                 use_container_width=True
             )
-
-    else:
-        st.info("No validation/test metrics extracted.")
-
-

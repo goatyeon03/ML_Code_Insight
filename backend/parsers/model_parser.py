@@ -1,6 +1,10 @@
 import ast
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional
+import os
+
+# 파일 단위 캐시: { path: (mtime, result_dict) }
+_MODEL_CACHE: Dict[str, Any] = {}
 
 
 @dataclass
@@ -18,24 +22,25 @@ class LayerNode:
 
 
 # ============================================================
-# AST 유틸 함수들
+# AST 유틸 함수들 (가능한 한 가볍게)
 # ============================================================
 def _expr_to_str(node: ast.AST) -> str:
     """
-    인자 표현을 문자열로 안전하게 변환.
-    - 숫자/문자열/리스트/튜플 같은 literal이면 literal_eval 시도
-    - 그 외에는 ast.unparse (3.9+) 혹은 repr로 fallback
+    인자 표현을 최대한 가볍게 문자열로 변환.
+    - 숫자/문자열은 값 그대로
+    - Name / Attribute 정도만 간단히 표시
+    - 나머지는 '...'으로 축약
     """
-    import ast as _ast
-
-    try:
-        value = _ast.literal_eval(node)
-        return repr(value)
-    except Exception:
-        try:
-            return _ast.unparse(node)  # Python 3.9+
-        except Exception:
-            return repr(node)
+    if isinstance(node, ast.Constant):
+        return repr(node.value)
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        # torch.nn.Conv2d 이런건 Conv2d 정도만 보이게
+        return node.attr
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return "[" + ", ".join(_expr_to_str(e) for e in node.elts) + "]"
+    return "..."
 
 
 def _is_nn_module_base(base: ast.expr) -> bool:
@@ -44,7 +49,7 @@ def _is_nn_module_base(base: ast.expr) -> bool:
     """
     # nn.Module / torch.nn.Module 등
     if isinstance(base, ast.Attribute):
-        if base.attr == "Module" and isinstance(base.value, ast.Name):
+        if base.attr == "Module":
             return True
 
     # from torch.nn import Module; class Foo(Module):
@@ -81,10 +86,13 @@ def _extract_layers_from_init(
     """
     __init__ 내부에서 self.xxx = Something(...) 패턴을 찾아 LayerNode 리스트로 변환
     Sequential 은 내부 sub layer까지 풀어서 기록
+    (성능 때문에 ast.walk 대신 body 한 번만 순회)
     """
     layers: List[LayerNode] = []
 
-    for node in ast.walk(init_func):
+    stmts = init_func.body
+
+    for node in stmts:
         if isinstance(node, ast.Assign):
             targets = node.targets
             value = node.value
@@ -195,128 +203,6 @@ def _extract_layers_from_init(
 
     layers.sort(key=lambda n: n.line_no if n.line_no else 10**9)
     return layers
-
-
-# ============================================================
-# 메인 함수 (외부에서 사용하는 진입점)
-# ============================================================
-def parse_model_structure(path: str) -> Dict[str, Any]:
-    """
-    전체 파일의 모델 구조를 분석:
-    - 모든 nn.Module subclass 파싱
-    - 클래스 기반 blocks 추출
-    - top-level 변수 기반 blocks 추출
-    - model graph & pipeline 구성
-    """
-    # 1) 파일 읽기 & AST 생성
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            code = f.read()
-    except FileNotFoundError:
-        return {"top_model": None, "models": {}, "pipeline": [], "error": f"File not found: {path}"}
-
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as e:
-        return {"top_model": None, "models": {}, "pipeline": [], "error": f"SyntaxError: {e}"}
-
-    lines = code.splitlines()
-
-    # 2) 모든 모델 클래스 찾기
-    model_classes = _find_model_classes(tree)
-    model_names = {cls.name for cls in model_classes}
-
-    # 저장 구조
-    models: Dict[str, Dict[str, Any]] = {}
-
-    # 3) class 기반 blocks / children 추출
-    for cls in model_classes:
-        init_func = _find_init_method(cls)
-        if init_func:
-            layer_nodes = _extract_layers_from_init(cls, init_func, lines)
-            blocks = group_nodes_by_source(layer_nodes)
-        else:
-            blocks = []
-
-        # children (다른 모델 클래스를 __init__에서 생성하는 경우)
-        children: List[str] = []
-        if init_func:
-            for node in ast.walk(init_func):
-                if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                    value = node.value
-                else:
-                    continue
-
-                if not isinstance(value, ast.Call):
-                    continue
-
-                func = value.func
-                if isinstance(func, ast.Name):
-                    fname = func.id
-                elif isinstance(func, ast.Attribute):
-                    fname = func.attr
-                else:
-                    continue
-
-                if fname in model_names and fname != cls.name:
-                    children.append(fname)
-
-        models[cls.name] = {
-            "blocks": blocks,
-            "children": children,
-        }
-
-    # 4) Top-level assignment 기반 블럭 추출
-    top_assigns = _find_top_level_assignments(tree)
-    top_blocks = _build_top_level_blocks(top_assigns, lines)
-
-    models["_TopLevelModule"] = {
-        "blocks": top_blocks,
-        "children": [],
-    }
-
-    # 5) top-model 결정: "마지막으로 생성된 모델 클래스" 기준
-    usage_order: List[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Name):
-                fname = func.id
-            elif isinstance(func, ast.Attribute):
-                fname = func.attr
-            else:
-                continue
-
-            if fname in model_names:
-                usage_order.append(fname)
-
-    if usage_order:
-        top_model = usage_order[-1]
-    else:
-        # fallback: children 에 등장하지 않는 클래스 중 파일에서 가장 마지막에 등장한 것
-        all_children = set()
-        for m in models.values():
-            all_children.update(m["children"])
-        candidates = list(model_names - all_children)
-
-        if candidates:
-            class_order = [cls.name for cls in model_classes]
-            top_model = None
-            for name in reversed(class_order):
-                if name in candidates:
-                    top_model = name
-                    break
-        else:
-            top_model = "_TopLevelModule"
-
-    pipeline = extract_pipeline_by_class(tree, model_names)
-
-    return {
-        "top_model": top_model,
-        "models": models,
-        "pipeline": pipeline,
-        "error": None,
-    }
 
 
 # ============================================================
@@ -480,3 +366,162 @@ def extract_pipeline_by_class(tree: ast.AST,
             final.append(name)
     return final
 
+
+# ============================================================
+# 메인 함수 (외부에서 사용하는 진입점)
+# ============================================================
+def parse_model_structure(path: str) -> Dict[str, Any]:
+    """
+    전체 파일의 모델 구조를 분석:
+    - 모든 nn.Module subclass 파싱
+    - 클래스 기반 blocks 추출
+    - top-level 변수 기반 blocks 추출
+    - model graph & pipeline 구성
+    + 파일 mtime 기준 캐싱
+    """
+    # 0) 캐시 체크
+    try:
+        mtime = os.path.getmtime(path)
+    except FileNotFoundError:
+        return {
+            "top_model": None,
+            "models": {},
+            "pipeline": [],
+            "error": f"File not found: {path}",
+        }
+
+    cached = _MODEL_CACHE.get(path)
+    if cached is not None:
+        cached_mtime, cached_result = cached
+        if cached_mtime == mtime:
+            return cached_result
+
+    # 1) 파일 읽기 & AST 생성
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            code = f.read()
+    except FileNotFoundError:
+        return {
+            "top_model": None,
+            "models": {},
+            "pipeline": [],
+            "error": f"File not found: {path}",
+        }
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        result = {
+            "top_model": None,
+            "models": {},
+            "pipeline": [],
+            "error": f"SyntaxError: {e}",
+        }
+        _MODEL_CACHE[path] = (mtime, result)
+        return result
+
+    lines = code.splitlines()
+
+    # 2) 모든 모델 클래스 찾기
+    model_classes = _find_model_classes(tree)
+    model_names = {cls.name for cls in model_classes}
+
+    # 저장 구조
+    models: Dict[str, Dict[str, Any]] = {}
+
+    # 3) class 기반 blocks / children 추출
+    for cls in model_classes:
+        init_func = _find_init_method(cls)
+        if init_func:
+            layer_nodes = _extract_layers_from_init(cls, init_func, lines)
+            blocks = group_nodes_by_source(layer_nodes)
+        else:
+            blocks = []
+
+        # children (다른 모델 클래스를 __init__에서 생성하는 경우)
+        children: List[str] = []
+        if init_func:
+            for node in init_func.body:
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    value = (
+                        node.value if isinstance(node, ast.Assign) else node.value
+                    )
+                else:
+                    continue
+
+                if not isinstance(value, ast.Call):
+                    continue
+
+                func = value.func
+                if isinstance(func, ast.Name):
+                    fname = func.id
+                elif isinstance(func, ast.Attribute):
+                    fname = func.attr
+                else:
+                    continue
+
+                if fname in model_names and fname != cls.name:
+                    children.append(fname)
+
+        models[cls.name] = {
+            "blocks": blocks,
+            "children": children,
+        }
+
+    # 4) Top-level assignment 기반 블럭 추출
+    try:
+        top_assigns = _find_top_level_assignments(tree)
+        top_blocks = _build_top_level_blocks(top_assigns, lines)
+    except Exception:
+        top_blocks = []
+
+    models["_TopLevelModule"] = {
+        "blocks": top_blocks,
+        "children": [],
+    }
+
+    # 5) top-model 결정
+    usage_order: List[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name):
+                fname = func.id
+            elif isinstance(func, ast.Attribute):
+                fname = func.attr
+            else:
+                continue
+
+            if fname in model_names:
+                usage_order.append(fname)
+
+    if usage_order:
+        top_model = usage_order[-1]
+    else:
+        # children 에 등장하지 않는 클래스 중 파일에서 가장 마지막에 등장한 것
+        all_children = set()
+        for m in models.values():
+            all_children.update(m["children"])
+        candidates = list(model_names - all_children)
+
+        if candidates:
+            class_order = [cls.name for cls in model_classes]
+            top_model = None
+            for name in reversed(class_order):
+                if name in candidates:
+                    top_model = name
+                    break
+        else:
+            top_model = "_TopLevelModule"
+
+    pipeline = extract_pipeline_by_class(tree, model_names)
+
+    result = {
+        "top_model": top_model,
+        "models": models,
+        "pipeline": pipeline,
+        "error": None,
+    }
+
+    _MODEL_CACHE[path] = (mtime, result)
+    return result

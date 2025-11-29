@@ -74,19 +74,6 @@ def upload_result_api(user_id, project_id, rf):
     except Exception as e:
         return {"error": str(e)}
 
-# utils/file_ops.py 내부에 추가해야함
-
-def delete_file_api(user_id, file_id):
-    try:
-        res = requests.post(
-            f"{API_URL}/delete_file",
-            data={"user_id": user_id, "file_id": file_id}
-        )
-        return res.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-
 def create_project_api(user_id, project_name):
     try:
         res = requests.post(

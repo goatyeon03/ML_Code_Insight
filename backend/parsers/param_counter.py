@@ -1,184 +1,239 @@
-# backend/parsers/param_counter.py
-
 import ast
-import os
-import tempfile
+import inspect
 import importlib.util
+import os
+import sys
+import tempfile
+import torch
 import torch.nn as nn
+from types import ModuleType
 
 
-# ---------------------------------------------------------------
-# 1) AST 분석: import / class 정의만 추출하기
-# ---------------------------------------------------------------
-
-def extract_model_class_ast(file_path: str):
+# ============================================================
+# 🔥 Robust NN.Module inheritance detection
+# ============================================================
+def is_module_subclass(node, imported_bases):
     """
-    원본 학습 코드에서:
-    - import 문들
-    - nn.Module을 상속하는 Class 정의
-    만 AST로 추출
+    node: ast.ClassDef
+    imported_bases: dict mapping alias → actual module path
+    ex: {'nn': 'torch.nn', 'F': 'torch.nn.functional'}
     """
-    with open(file_path, "r", encoding="utf-8") as f:
-        source = f.read()
+    for base in node.bases:
+        # direct name: class Foo(nn.Module)
+        if isinstance(base, ast.Attribute):
+            full = f"{imported_bases.get(base.value.id, base.value.id)}.{base.attr}"
+            if full == "torch.nn.Module":
+                return True
 
-    tree = ast.parse(source)
+        if isinstance(base, ast.Name):
+            # ex: class Foo(Module)
+            if base.id == "Module":
+                return True
+            # alias 처리: class Foo(nn.Module)
+            if base.id in imported_bases:
+                if imported_bases[base.id] == "torch.nn":
+                    return True
 
-    import_nodes = []
-    class_nodes = []
-
-    for node in tree.body:
-        # import 관련 노드
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            import_nodes.append(node)
-
-        # class 정의 노드
-        elif isinstance(node, ast.ClassDef):
-            # base classes 확인
-            is_nn_module = False
-            for base in node.bases:
-                # 예: nn.Module
-                if isinstance(base, ast.Attribute) and base.attr == "Module":
-                    is_nn_module = True
-                # 예: Module (from torch.nn import Module)
-                elif isinstance(base, ast.Name) and base.id == "Module":
-                    is_nn_module = True
-
-            if is_nn_module:
-                class_nodes.append(node)
-
-    return import_nodes, class_nodes
+    return False
 
 
-# ---------------------------------------------------------------
-# 2) 추출한 AST → 임시 파일 생성
-# ---------------------------------------------------------------
+# ============================================================
+# 🔥 Dummy constructor args generator
+# ============================================================
+def generate_dummy_args(cls):
+    sig = inspect.signature(cls.__init__)
+    kwargs = {}
 
-def create_temp_model_file(import_nodes, class_nodes):
-    """
-    import + class_def AST를 하나의 코드로 재구성하여
-    임시 파이썬 파일 생성
-    """
-    temp_code = ""
+    for name, p in sig.parameters.items():
+        if name == "self":
+            continue
 
-    # import 문 다시 코드로 변환
-    for node in import_nodes:
-        temp_code += ast.unparse(node) + "\n"
+        # default값 있으면 사용
+        if p.default is not inspect.Parameter.empty:
+            continue
 
-    temp_code += "\n"
+        # annotation 기반 dummy
+        if p.annotation in [int, float]:
+            kwargs[name] = 1
+        elif p.annotation == bool:
+            kwargs[name] = False
+        elif p.annotation == str:
+            kwargs[name] = ""
+        elif p.annotation in [tuple, list]:
+            kwargs[name] = [1]
+        else:
+            # 모르는 타입이면 None
+            kwargs[name] = None
 
-    # class 정의 코드 추가
-    for node in class_nodes:
-        temp_code += ast.unparse(node) + "\n\n"
-
-    # 임시 파일 생성
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w", encoding="utf-8")
-    tmp.write(temp_code)
-    tmp.close()
-    return tmp.name
+    return kwargs
 
 
-# ---------------------------------------------------------------
-# 3) 임시 파일에서 클래스 import
-# ---------------------------------------------------------------
+# ============================================================
+# 🔥 Instantiate model with dummy arguments
+# ============================================================
+def instantiate_model(cls):
+    try:
+        # 1차: 기본 생성자
+        return cls()
+    except Exception:
+        pass
 
-def load_classes_from_module(temp_file):
-    """
-    임시 파이썬 파일을 import해서 nn.Module subclass들을 로드
-    """
-    spec = importlib.util.spec_from_file_location("temp_model_module", temp_file)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        # 2차: dummy args 기반 시도
+        dummy = generate_dummy_args(cls)
+        return cls(**dummy)
+    except Exception as e:
+        return f"Instantiation failed: {e}"
 
+
+# ============================================================
+# 🔥 Extract nn.Module classes using AST (robust)
+# ============================================================
+def extract_model_classes(src: str):
+    tree = ast.parse(src)
+
+    imported_bases = {}
     model_classes = []
-    for name in dir(module):
-        obj = getattr(module, name)
-        if isinstance(obj, type) and issubclass(obj, nn.Module) and obj is not nn.Module:
-            model_classes.append(obj)
+
+    for node in ast.walk(tree):
+
+        # import torch.nn as nn
+        if isinstance(node, ast.Import):
+            for n in node.names:
+                if n.asname:
+                    imported_bases[n.asname] = n.name
+
+        # from torch import nn
+        if isinstance(node, ast.ImportFrom):
+            if node.module:
+                for n in node.names:
+                    if n.asname:
+                        imported_bases[n.asname] = f"{node.module}"
+                    else:
+                        imported_bases[n.name] = f"{node.module}"
+
+        # class detection
+        if isinstance(node, ast.ClassDef):
+            if is_module_subclass(node, imported_bases):
+                model_classes.append(node.name)
 
     return model_classes
 
 
-# ---------------------------------------------------------------
-# 4) param count 계산
-# ---------------------------------------------------------------
-
-def get_param_count_for_class(cls):
+# ============================================================
+# 🔥 Load model class from temp module
+# ============================================================
+def load_class_from_file(filepath, class_name):
     """
-    기본 생성자에서 인자 없는 경우만 instantiate하여 param count 계산
+    File → temp module import → get attribute
     """
-    import inspect
-    sig = inspect.signature(cls.__init__)
+    spec = importlib.util.spec_from_file_location("temp_user_model", filepath)
+    module = importlib.util.module_from_spec(spec)
 
-    # 기본값 없는 인자가 있으면 스킵
-    for name, p in sig.parameters.items():
-        if name == "self":
-            continue
-        if p.default is inspect.Parameter.empty:
-            return {
-                "class_name": cls.__name__,
-                "total_params": None,
-                "error": f"Constructor of {cls.__name__} requires arguments."
-            }
-
-    # instantiate
     try:
-        model = cls()
+        spec.loader.exec_module(module)
     except Exception as e:
-        return {
-            "class_name": cls.__name__,
-            "total_params": None,
-            "error": f"Instantiation failed: {e}"
-        }
+        return None, f"Module load failed: {e}"
 
-    # param count
+    if not hasattr(module, class_name):
+        return None, f"class `{class_name}` not found in module"
+
+    return getattr(module, class_name), None
+
+
+# ============================================================
+# 🔥 Count params
+# ============================================================
+def count_params(model):
     try:
         total = sum(p.numel() for p in model.parameters())
-        return {
-            "class_name": cls.__name__,
-            "total_params": int(total),
-            "error": None
-        }
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        return total, trainable, None
     except Exception as e:
-        return {
-            "class_name": cls.__name__,
-            "total_params": None,
-            "error": f"Param count failed: {e}"
-        }
+        return None, None, str(e)
 
 
-# ---------------------------------------------------------------
-# 5) 파일 전체에 대한 param count 결과 반환
-# ---------------------------------------------------------------
-
+# ============================================================
+# 🔥 Public API
+# ============================================================
 def get_param_count(file_path: str):
     """
-    최종 API에서 호출할 함수.
-    파일에서 class 정의만 추출 → 임시 파일 생성 → param count 계산 → 반환
+    Returns:
+    {
+      "results": {
+         class_name: {
+            "total_params": ...,
+            "trainable_params": ...,
+            "error": None or "msg"
+         }
+      },
+      "error": None
+    }
     """
+
     try:
-        imports, classes = extract_model_class_ast(file_path)
+        with open(file_path, "r", encoding="utf-8") as f:
+            src = f.read()
+    except Exception as e:
+        return {"results": {}, "error": f"file read error: {e}"}
 
-        if not classes:
-            return {"error": "No nn.Module classes detected."}
+    # -----------------------------------------
+    # 1) AST 기반 모델 클래스 추출
+    # -----------------------------------------
+    model_classes = extract_model_classes(src)
 
-        # 임시 파일 생성
-        temp_file = create_temp_model_file(imports, classes)
-
-        # 임시 파일에서 클래스 로드
-        model_classes = load_classes_from_module(temp_file)
-
-        # 임시 파일 삭제
-        os.remove(temp_file)
-
-        # 파라미터 개수 계산
-        results = {}
-        for cls in model_classes:
-            results[cls.__name__] = get_param_count_for_class(cls)
-
+    if not model_classes:
+        # 안전한 기본 반환
         return {
-            "error": None,
-            "results": results
+            "results": {},
+            "error": "No nn.Module subclasses found"
         }
 
-    except Exception as e:
-        return {"error": f"Param counter fatal error: {e}"}
+    results = {}
+
+    # -----------------------------------------
+    # 2) temp file 생성 후 모델 import
+    # -----------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_file = os.path.join(tmpdir, "model_temp.py")
+
+        with open(temp_file, "w", encoding="utf-8") as f:
+            f.write(src)
+
+        for cls_name in model_classes:
+            cls, err = load_class_from_file(temp_file, cls_name)
+            if err:
+                results[cls_name] = {
+                    "total_params": None,
+                    "trainable_params": None,
+                    "error": err
+                }
+                continue
+
+            # -----------------------------------------
+            # 3) instantiate model (dummy args allowed)
+            # -----------------------------------------
+            instance = instantiate_model(cls)
+            if isinstance(instance, str):  # error message
+                results[cls_name] = {
+                    "total_params": None,
+                    "trainable_params": None,
+                    "error": instance
+                }
+                continue
+
+            # -----------------------------------------
+            # 4) count params
+            # -----------------------------------------
+            total, trainable, err = count_params(instance)
+
+            results[cls_name] = {
+                "total_params": total,
+                "trainable_params": trainable,
+                "error": err
+            }
+
+    return {
+        "results": results,
+        "error": None
+    }

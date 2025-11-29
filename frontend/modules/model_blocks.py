@@ -40,38 +40,18 @@ def render_model_tree(model_name, models, depth=0):
     # Submodules
     children = model.get("children", [])
     if children:
-        st.markdown(f"#### 🔻 Submodules of `{model_name}`")
+        st.markdown(f"##### 🔻 Submodules of `{model_name}`")
 
     for child in children:
         with st.expander(f"Submodel: `{child}`", expanded=False):
             render_model_tree(child, models, depth+1)
 
 
-# ------------------------------------------------------
-# 2) 입력한 차원 파싱
-# ------------------------------------------------------
-def parse_dim_input(text: str) -> str:
-    if not text:
-        return ""
-
-    cleaned = (
-        text.replace("X", "x")
-            .replace(",", " ")
-            .replace("-", " ")
-            .replace("|", " ")
-            .replace("x", " ")
-    )
-    parts = [p for p in cleaned.split() if p.isdigit()]
-    if not parts:
-        return ""
-
-    return "x".join(parts)
-
 
 # ------------------------------------------------------
 # 3) Pipeline Flow (streamlit-flow-component)
 # ------------------------------------------------------
-def render_pipeline_graphviz(pipeline, models, area, input_dim=None, output_dim=None):
+def render_pipeline_graphviz(pipeline, models, area):
     dot = gv.Digraph("Pipeline", format="svg")
     dot.attr(rankdir="LR", splines="ortho", nodesep="1.0")
     # HTML label 쓸 거라 fontsize는 여기선 크게 의미 없음
@@ -205,37 +185,6 @@ def app():
     if not models:
         st.warning("No model structure found.")
         return
-
-    # --------------------------------------------------
-    # 모델 선택
-    # --------------------------------------------------
-    # st.markdown("### 📐 Model Input/Output Shape")
-
-    # raw_input_dim = st.text_input(
-    #     "Input Dimension",
-    #     placeholder="e.g. 128,1000",
-    #     key="pipeline_input_dim"
-    # )
-    # raw_output_dim = st.text_input(
-    #     "Output Dimension",
-    #     placeholder="e.g. 1 or 128,32",
-    #     key="pipeline_output_dim"
-    # )
-
-    # input_dim = parse_dim_input(raw_input_dim)
-    # output_dim = parse_dim_input(raw_output_dim)
-
-    # # --------------------------------------------------
-    # # Pipeline Flow 렌더링
-    # # --------------------------------------------------
-    # if "pipeline" in data:
-    #     diagram_area = st.empty()  # 🔥 여기서 placeholder 생성
-    #     render_pipeline_graphviz(
-    #         pipeline=data["pipeline"],
-    #         models=models,
-    #         area=diagram_area
-    #     )
-
 
 
     # --------------------------------------------------
