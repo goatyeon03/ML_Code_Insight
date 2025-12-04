@@ -151,17 +151,38 @@ def main():
         <div style="text-align: center; padding-top: 60px;">
 
         <h1 style="font-size: 42px; font-weight: 700; margin-bottom: 10px;">
-            🧠 ML Code Insight
+            🎯 Pytorch Experiment Dashboard
         </h1>
 
         <h3 style="color: #666; font-weight: 400; margin-bottom: 30px;">
-            A unified workspace for exploring, comparing, and visualizing your Machine Learning experiments.
+            A unified workspace for exploring, comparing, and visualizing your <b>PyTorch</b> experiments.
         </h3>
 
         <p style="font-size: 18px; line-height: 1.5; color: #444; max-width: 650px; margin: 0 auto 40px auto;">
-            Upload your training scripts, analyze model structures, 
-            view result visualizations, and track performance across experiments—all in one project dashboard.
+            Upload your <b>PyTorch</b> training scripts, analyze model architectures,
+            explore parsed components, visualize experiment results, and track performance across runs—all in one dashboard.
         </p>
+
+        <!-- limitation 빨간 박스 -->
+        <div style="
+            margin: 0 auto 35px auto;
+            max-width: 600px;
+            padding: 14px 18px;
+            border-radius: 8px;
+            background: #ffecec;
+            border-left: 5px solid #ff6b6b;
+            color: #7a0000;
+            font-size: 15px;
+            line-height: 1.5;
+            text-align: left;
+        ">
+            <b>⚠️ Limitation</b><br>
+            <ul>
+                <li>Only PyTorch model definitions contained in <b>a single file</b> are currently supported.</li>
+                <li>Multi-file model architectures may not be fully recognized in this version.</li>
+            </ul>
+            I am actively working to enhance multi-file support in future updates.
+        </div>
 
         <div style="font-size: 20px; margin-top: 40px; font-weight: 500;">
             👉 Please <span style="color:#4A90E2;">log in</span> or 
