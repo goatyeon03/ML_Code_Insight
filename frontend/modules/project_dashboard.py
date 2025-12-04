@@ -6,10 +6,12 @@ import streamlit as st
 import plotly.express as px
 import requests
 import time
+import os
 
 from utils.db import get_conn  # ✔ SELECT 용도로만 사용됨
 from utils.file_ops import upload_result_api  # ✔ write는 FastAPI에서만 수행
 from utils.match_utils import match_code_and_results
+
 
 
 API_URL = "http://localhost:8000"
@@ -53,6 +55,14 @@ def _load_code_files(project_id: int, user_id: int):
 # (2) 메인 렌더링 함수
 # -------------------------------------------------------------
 def render_project_dashboard(project_id: int, user_id: int):
+
+    # ------------------------------
+    # PARAM COUNT CACHE (per file)
+    # ------------------------------
+    if "param_cache" not in st.session_state:
+        st.session_state["param_cache"] = {}
+
+
 
     # === 프로젝트 이름 로드 ===
     conn = get_conn()
@@ -169,10 +179,6 @@ def render_project_dashboard(project_id: int, user_id: int):
     )
 
 
-    st.markdown("### 🔍 DEBUG: Training Summary Data")
-    st.json(training)
-
-
 
     # =========================================================
     # 2) Upper Layout: Left = Model Structure / Right = Params
@@ -246,56 +252,126 @@ def render_project_dashboard(project_id: int, user_id: int):
         stages = training.get("stages", {})
         # overall = training.get("overall", {})
 
-        # -------------------------
-        # PARAM COUNT (enhanced)
-        # -------------------------
-        total_params = None
-        param_error = None
-        notes = None
+        # ---------------------------------------------------------
+        # PARAM COUNT (multi-module) — CACHED VERSION
+        # ---------------------------------------------------------
+
+        trainable_modules = summary.get("model", {}).get("trainable_modules", {})
+
+        # 파일 path 기반 캐시 key 생성 (파일 overwrite 시 자동 갱신)
+        file_path = os.path.join("backend/uploads/code", id2name[selected_id])
+        file_size = os.path.getsize(file_path)
+        file_key = f"{selected_id}-{file_size}"
+
+        # 캐시에 없다면 계산 실행
+        if file_key not in st.session_state["param_cache"]:
+
+            if trainable_modules:
+                try:
+                    resp = requests.post(
+                        f"{API_URL}/param_count_multi",
+                        data={
+                            "filename": id2name[selected_id],
+                            "modules_json": json.dumps(trainable_modules),
+                        },
+                        timeout=30,
+                    )
+
+                    st.session_state["param_cache"][file_key] = resp.json()
+
+                except Exception as e:
+                    st.session_state["param_cache"][file_key] = {
+                        "error": f"param_count_multi request failed: {e}",
+                        "total": None,
+                        "breakdown": {},
+                    }
+            else:
+                st.session_state["param_cache"][file_key] = {
+                    "error": "No trainable_modules found.",
+                    "total": None,
+                    "breakdown": {},
+                }
+
+        # 항상 캐시에서 읽기
+        param_result = st.session_state["param_cache"][file_key]
+
+        total_params = param_result.get("total")
+        warning_msg = param_result.get("warning") or param_result.get("error")
+        breakdown = param_result.get("breakdown", {})
 
 
-        if model_class_name:
-            try:
-                resp = requests.post(
-                    f"{API_URL}/param_count_enhanced",
-                    data={
-                        "filename": id2name[selected_id],
-                        "class_name": model_class_name,
-                    },
-                    timeout=10,
-                )
 
-                data = resp.json()
-
-                # merged 값 (param_counter + llm 병합)
-                total_params = data.get("merged")
-                notes = data.get("notes")
-
-                # 기본 API 에러 처리
-                if total_params is None:
-                    param_error = "Failed to compute parameters."
-
-            except Exception as e:
-                param_error = str(e)
-
-        else:
-            param_error = "Model class name not found in summary."
-
-
-        # -------------------------
-        # UI 표시
-        # -------------------------
+        # ----- TOTAL PARAMS 표시 -----
         if total_params is not None:
             show_param("Total Parameters", f"{int(total_params):,}")
         else:
             show_param("Total Parameters", "N/A")
 
-        # notes 출력 (LLM reasoning 등)
-        if notes:
-            st.caption(notes)
 
-        if param_error:
-            st.caption(f"Param count error: {param_error}")
+        # ----- Warning 메시지 -----
+        if warning_msg:
+            st.caption(f"⚠️ {warning_msg}")
+
+
+        # ----- Breakdown 표시 -----
+        if breakdown:
+            with st.expander("Show parameter breakdown by class"):
+
+                for cls_name, info in breakdown.items():
+                    status = info.get("status")
+                    value = info.get("value")
+
+                    if status == "ok":
+                        # 정상 계산
+                        if value == 0:
+                            st.markdown(f"• **{cls_name}** — 0 params")
+                        else:
+                            st.markdown(f"✔ **{cls_name}** — {value:,} params")
+
+                    elif status == "failed":
+                        # instantiation 실패
+                        st.markdown(f"✖ **{cls_name}** — failed to instantiate")
+
+                    else:
+                        # 기타 예외 케이스 (거의 없지만 안전하게 처리)
+                        st.markdown(f"• **{cls_name}** — N/A")
+
+
+
+        # ---------------------------------------------------------
+        # LLM 기반 추정 (옵션, fallback 용도)
+        # ---------------------------------------------------------
+        llm_total = None
+        llm_reason = None
+        llm_note = None
+
+        # 실행 기반에서 값을 못 구했을 때만 LLM 버튼 노출
+        if total_params is None:
+            if st.button(
+                "🔍 Try LLM-based parameter estimate (may be slow)",
+                key=f"btn_llm_param_{selected_id}",
+            ):
+                try:
+                    resp = requests.post(
+                        f"{API_URL}/param_count_enhanced",
+                        data={"filename": id2name[selected_id]},
+                        timeout=30,
+                    )
+                    data = resp.json()
+                    llm_total = data.get("estimated")
+                    llm_reason = data.get("reasoning")
+                    llm_note = data.get("notes")
+                except Exception as e:
+                    llm_note = f"LLM estimate failed: {e}"
+
+        # 버튼을 누른 경우에만 같은 run 안에서 LLM 결과 표시
+        if llm_total is not None:
+            show_param("Total Parameters (LLM approx)", f"{int(llm_total):,}")
+            if llm_reason:
+                st.caption(f"📘 LLM reasoning: {llm_reason}")
+        if llm_note:
+            st.caption(f"ℹ️ LLM note: {llm_note}")
+
 
 
         def has_meaningful_values(stage_dict):

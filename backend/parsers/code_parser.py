@@ -1,4 +1,41 @@
 import ast
+from backend.llm.model_name_extractor import llm_extract_model_class
+from backend.parsers.module_collector import collect_trainable_modules
+
+
+def extract_model_classes(text):
+    """
+    다양한 형태의 PyTorch 모델 선언을 robust하게 감지.
+    - model = ClassName(...)
+    - encoder = ClassName(...)
+    - net = ClassName(...)
+    - model = ClassName().to(...)
+    - encoder = ClassName().cuda()
+    - 클래스 이름은 대문자로 시작한다고 가정 (PyTorch 일반 관례)
+    """
+    import re
+    
+    candidates = []
+
+    # 1) 가장 일반적인 형태:   variable = ClassName(...)
+    pattern_basic = r"([a-zA-Z_][\w]*)\s*=\s*([A-Z][A-Za-z0-9_]*)\s*\("
+    for var, cls in re.findall(pattern_basic, text):
+        candidates.append((var, cls))
+
+    # 2) 체이닝 포함:   var = ClassName(...).to(...)
+    pattern_chain = r"([a-zA-Z_][\w]*)\s*=\s*([A-Z][A-Za-z0-9_]*)\s*\([^)]*\)\s*\."
+    for var, cls in re.findall(pattern_chain, text):
+        candidates.append((var, cls))
+
+    # 중복 제거
+    seen = set()
+    final = []
+    for v, c in candidates:
+        if (v, c) not in seen:
+            seen.add((v, c))
+            final.append((v, c))
+
+    return final
 
 
 class MLCodeParser(ast.NodeVisitor):
@@ -46,39 +83,38 @@ class MLCodeParser(ast.NodeVisitor):
         return None
     
     def visit_ClassDef(self, node):
-        print(f"[DEBUG] Found class: {node.name}")
 
         class_name = node.name
         is_model_class = False
 
         # 상속 구조 디버깅
         for base in node.bases:
-            try:
-                print(f"[DEBUG]   base: {ast.unparse(base)}")
-            except:
-                pass
+            # try:
+            #     # print(f"[DEBUG]   base: {ast.unparse(base)}")
+            # except:
+            #     pass
 
             if isinstance(base, ast.Attribute) and base.attr == "Module":
-                print("[DEBUG]   → inherits nn.Module via Attribute")
+                # print("[DEBUG]   → inherits nn.Module via Attribute")
                 is_model_class = True
             if isinstance(base, ast.Name) and base.id == "Module":
-                print("[DEBUG]   → inherits nn.Module via Name")
+                # print("[DEBUG]   → inherits nn.Module via Name")
                 is_model_class = True
 
         # __init__ 내부 확인
         for body_item in node.body:
             if isinstance(body_item, ast.FunctionDef) and body_item.name == "__init__":
-                print(f"[DEBUG]   Checking __init__ of {class_name}")
+                # print(f"[DEBUG]   Checking __init__ of {class_name}")
                 try:
                     text = ast.unparse(body_item)
                     if any(x in text for x in ["nn.Conv", "nn.Linear", "nn.BatchNorm"]):
-                        print(f"[DEBUG]   → {class_name} has NN layers ⇒ model class detected")
+                        # print(f"[DEBUG]   → {class_name} has NN layers ⇒ model class detected")
                         is_model_class = True
                 except:
                     pass
 
         if is_model_class:
-            print(f"[DEBUG] >>> MODEL CLASS DETECTED: {class_name}")
+            # print(f"[DEBUG] >>> MODEL CLASS DETECTED: {class_name}")
             self.summary["model"]["name"] = class_name
 
         self.generic_visit(node)
@@ -106,7 +142,7 @@ class MLCodeParser(ast.NodeVisitor):
         if isinstance(node.value, ast.Call):
             try:
                 call_repr = ast.unparse(node.value)
-                print(f"[DEBUG] Assign Call: {call_repr}")
+                # print(f"[DEBUG] Assign Call: {call_repr}")
             except:
                 pass
         
@@ -133,7 +169,7 @@ class MLCodeParser(ast.NodeVisitor):
             if class_name in OPTIMIZER_CLASSES:
                 return
 
-            print(f"[DEBUG] Model instantiation detected (Name): {class_name}")
+            # print(f"[DEBUG] Model instantiation detected (Name): {class_name}")
             self.summary["model"]["name"] = class_name
 
 
@@ -147,7 +183,7 @@ class MLCodeParser(ast.NodeVisitor):
             if class_name in OPTIMIZER_CLASSES:
                 return
 
-            print(f"[DEBUG] Model instantiation detected (Attribute): {class_name}")
+            # print(f"[DEBUG] Model instantiation detected (Attribute): {class_name}")
             self.summary["model"]["name"] = class_name
         
 
@@ -239,47 +275,97 @@ class MLCodeParser(ast.NodeVisitor):
     # Finalize: extract patterns like lr, batch, epochs, device
     # ---------------------------------------------------------
     def finalize(self):
-        print("[DEBUG] FINALIZING VARIABLES:")
+        # print("[DEBUG] FINALIZING VARIABLES:")
         for k, v in self.variables.items():
             print(f"  {k} = {v}")
 
         overall = self.summary["training"]["overall"]
 
-        print("[DEBUG] Before finalize overall:", overall)
+        # print("[DEBUG] Before finalize overall:", overall)
 
         # epochs
         for k, v in self.variables.items():
             if "epoch" in k.lower():
-                print(f"[DEBUG] epoch var detected: {k} = {v}")
+                # print(f"[DEBUG] epoch var detected: {k} = {v}")
                 overall["epochs"] = v
 
         # lr
         for k, v in self.variables.items():
             if "lr" in k.lower() or "learning_rate" in k.lower():
-                print(f"[DEBUG] lr var detected: {k} = {v}")
+                # print(f"[DEBUG] lr var detected: {k} = {v}")
                 overall["learning_rate"] = v
 
         # batch
         for k, v in self.variables.items():
             if "batch" in k.lower() or "bs" in k.lower():
-                print(f"[DEBUG] batch var detected: {k} = {v}")
+                # print(f"[DEBUG] batch var detected: {k} = {v}")
                 overall["batch_size"] = v
 
         # device
         for k, v in self.variables.items():
             if "device" in k.lower():
-                print(f"[DEBUG] device var detected: {k} = {v}")
+                # print(f"[DEBUG] device var detected: {k} = {v}")
                 overall["device"] = v
 
-        print("[DEBUG] After finalize overall:", overall)
+        # print("[DEBUG] After finalize overall:", overall)
 
 
     # ---------------------------------------------------------
-    def parse(self, source):
-        tree = ast.parse(source)
+    def parse(self, src):
+        tree = ast.parse(src)
         self.visit(tree)
-        self.finalize()
-        print("[DEBUG] FINAL SUMMARY:", self.summary)
+
+        debug_logs = []
+
+        # =======================================================
+        # 1) AST 기반 모델 정보 (MLCodeParser가 찾은 것)
+        # =======================================================
+        ast_model_name = self.summary.get("model", {}).get("class_name")
+        debug_logs.append(f"[AST] detected model class: {ast_model_name}")
+
+        # =======================================================
+        # 2) 정규식 기반 탐색
+        # =======================================================
+        model_vars = extract_model_classes(src)
+        debug_logs.append(f"[Regex] model_vars found: {model_vars}")
+
+        if model_vars:
+            var, cls = model_vars[-1]
+            self.summary.setdefault("model", {})
+            self.summary["model"]["class_name"] = cls
+            self.summary["model"]["variable_name"] = var
+            self.summary["model"]["all_detected_models"] = [
+                {"var": v, "class": c} for v, c in model_vars
+            ]
+            debug_logs.append(f"[Regex] final chosen class: {cls}")
+
+        else:
+            debug_logs.append("[Regex] no model vars detected → fallback to LLM")
+
+            # =======================================================
+            # 3) LLM 기반 추출
+            # =======================================================
+            from backend.llm.model_name_extractor import llm_extract_model_class
+            llm_res = llm_extract_model_class(src)
+            debug_logs.append(f"[LLM] extraction result: {llm_res}")
+
+            if llm_res.get("model_class"):
+                self.summary.setdefault("model", {})
+                self.summary["model"]["class_name"] = llm_res["model_class"]
+                self.summary["model"]["llm_verified"] = True
+                self.summary["model"]["llm_reason"] = llm_res.get("reason")
+                debug_logs.append(f"[LLM] LLM final class: {llm_res['model_class']}")
+            else:
+                debug_logs.append("[LLM] no model extracted")
+
+        # =======================================================
+        # Save debug logs so Streamlit sees it
+        # =======================================================
+        self.summary["debug_model_parser"] = debug_logs
+
+        modules = collect_trainable_modules(src)
+        self.summary["model"]["trainable_modules"] = modules
+
         return self.summary
 
 

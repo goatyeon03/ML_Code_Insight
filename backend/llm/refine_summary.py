@@ -78,7 +78,11 @@ Output ONLY valid JSON inside a code block.
   "notes": "Explain why you chose this stage."
 }}
 ----------------------------------------------------
-
+### IMPORTANT:
+- If summary.model.class_name already exists, NEVER modify or overwrite it.
+- Do not infer model class names from expressions like model.to(...).
+- Only fill missing fields, NEVER override existing model class names.
+--------------------------------------------------------
 
 ### CRITICAL RULES:
 - If you fill stages.finetune, training.overall MUST be empty {{}}.
@@ -106,6 +110,27 @@ Output ONLY valid JSON inside a code block.
                 refined = json.loads(json_str)
             else:
                 return ast_summary   # JSON 자체가 없음 → AST 반환
+
+
+        # --- 기존 ast_summary 쪽 debug 정보 보존 ---
+        if "debug_model_parser" in ast_summary:
+            refined["debug_model_parser"] = ast_summary["debug_model_parser"]
+
+        # --- 💡 trainable_modules 보존 (여기가 핵심) ---
+        tm = ast_summary.get("model", {}).get("trainable_modules")
+        if tm:
+            refined.setdefault("model", {})
+            refined["model"]["trainable_modules"] = tm
+
+
+        # ============================
+        # ⭐ DEBUG: 모델 이름 덮어쓰기 탐지
+        # ============================
+        refined.setdefault("debug_llm_refine", [])
+
+        before_model_name = refined.get("model", {}).get("name")
+        before_overall_class = refined.get("training", {}).get("overall", {}).get("model_class")
+
 
         # -------------------------------
         # ⭐ 모델 이름 복원 (AST 기반)
@@ -136,6 +161,25 @@ Output ONLY valid JSON inside a code block.
         if ast_model_name:
             refined["training"]["overall"]["model_class"] = ast_model_name
 
+        # return refined
+    
+
+        # ============================
+        # ⭐ DEBUG: LLM이 모델 이름을 변경했는지 확인
+        # ============================
+        after_model_name = refined.get("model", {}).get("name")
+        after_overall_class = refined.get("training", {}).get("overall", {}).get("model_class")
+
+        if before_model_name and after_model_name and before_model_name != after_model_name:
+            refined["debug_llm_refine"].append(
+                f"[WARN] model.name changed: '{before_model_name}' → '{after_model_name}'"
+            )
+
+        if before_overall_class and after_overall_class and before_overall_class != after_overall_class:
+            refined["debug_llm_refine"].append(
+                f"[WARN] training.overall.model_class changed: '{before_overall_class}' → '{after_overall_class}'"
+            )
+        
         return refined
 
 

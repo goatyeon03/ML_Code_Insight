@@ -14,24 +14,16 @@ if not API_KEY:
 client = genai.Client()
 
 def gemini_free(prompt: str) -> str:
-    with open("/home/goatyeon/ml_code_insight/backend/llm/gemini_debug.txt", "a", encoding="utf-8") as f:
-        f.write("\n[CALL] gemini_free()\n")
 
     # 2. generate_content 메서드 사용
     response = client.models.generate_content(
         model="gemini-2.0-flash-001", # 모델 이름 변경 (최신 버전은 'models/' 접두사 불필요)
         contents=prompt,
         config=types.GenerateContentConfig( # 추가 설정은 config 객체로 전달
-            temperature=0.2,
+            temperature=0.5,
             max_output_tokens=2048,
         )
     )
-
-    with open("/home/goatyeon/ml_code_insight/backend/llm/gemini_debug.txt", "a", encoding="utf-8") as f:
-        f.write("PROMPT_HEAD: " + prompt[:200] + "\n")
-
-    with open("/home/goatyeon/ml_code_insight/backend/llm/gemini_debug.txt", "a", encoding="utf-8") as f:
-        f.write("[RESPONSE] Gemini returned successfully\n")
 
     # 3. 응답 텍스트 반환
     return response.text

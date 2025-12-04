@@ -6,12 +6,14 @@ from fastapi.responses import PlainTextResponse
 import os
 import shutil
 import json
+import subprocess
+import sys
 
 from frontend.utils.db import get_conn, init_db
-from frontend.utils.match_utils import match_code_and_results
 
 from backend.routes.account import router as account_router
-from backend.parsers.param_counter import get_param_count_for_class
+from backend.llm.param_estimator import estimate_params_with_llm
+from backend.parsers.model_parser import parse_model_structure
 
 # 서버 시작 시 한 번만 스키마 초기화
 init_db()
@@ -384,164 +386,155 @@ def api_delete_project(user_id: int = Form(...), project_id: int = Form(...)):
     result = delete_project_and_unused_files(project_id, user_id)
     return result
 
+
+def _run_param_worker(file_path: str, class_name: str, timeout: float = 10.0):
+    """
+    Run the param_worker as a subprocess.
+    """
+    import os
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    WORKER_PATH = os.path.join(BASE_DIR, "parsers", "param_worker.py")
+
+    try:
+        proc = subprocess.run(
+            ["python3", WORKER_PATH, file_path, class_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            text=True
+        )
+
+        raw = proc.stdout.strip()
+        if not raw:
+            return {"results": {class_name: {"error": "Empty worker output"}}}
+
+        return json.loads(raw)
+
+    except subprocess.TimeoutExpired:
+        return {"results": {class_name: {"error": "timeout"}}}
+
+    except Exception as e:
+        return {"results": {class_name: {"error": f"worker crashed: {e}"}}}
+
+
 @app.get("/param_count")
-def api_param_count(filename: str, class_name: str):
+def api_param_count(
+    filename: str,
+    class_name: str,
+    timeout: float = 5.0,
+):
     file_path = os.path.join(UPLOAD_CODE, filename)
-    return get_param_count_for_class(file_path, class_name)
+    return _run_param_worker(file_path, class_name, timeout=timeout)
+
+from fastapi import Form
+
+@app.post("/param_count_multi")
+def api_param_count_multi(
+    filename: str = Form(...),
+    modules_json: str = Form(...),
+):
+    """
+    Calculates parameters for multiple modules.
+    """
+    try:
+        modules = json.loads(modules_json)
+    except Exception:
+        modules = {}
+
+    # 파일 경로
+    file_path = os.path.join(UPLOAD_CODE, filename)
+
+    # 결과 저장 구조
+    total_params = 0
+    breakdown = {}
+    errors = {}
+
+    # 1) class_name 목록 추출
+    unique_classes = set(modules.values())
+
+    for cls_name in unique_classes:
+
+        # ------------------------------------
+        # 필수 필터링: None / "" / 비문자 제거
+        # ------------------------------------
+        if cls_name is None:
+            continue
+
+        if not isinstance(cls_name, str):
+            continue
+
+        if cls_name.strip() == "":
+            continue
+
+        # ------------------------------------
+        # 실제 worker 실행
+        # ------------------------------------
+        worker_res = _run_param_worker(file_path, cls_name)
+
+        class_res = worker_res.get("results", {}).get(cls_name, {})
+        err = class_res.get("error")
+
+        if err:
+            breakdown[cls_name] = {"status": "failed", "value": None, "error": err}
+            errors[cls_name] = err
+            continue
+
+        val = class_res.get("trainable_params") or class_res.get("total_params")
+
+        if val is None:
+            breakdown[cls_name] = {"status": "failed", "value": None}
+            errors[cls_name] = "No params returned"
+            continue
+
+        breakdown[cls_name] = {"status": "ok", "value": val}
+        total_params += val
+
+    # 최종 응답
+    return {
+        "total": total_params if total_params > 0 else None,
+        "breakdown": breakdown,
+        "error": None,
+        "warning": "; ".join([f"{k}: {v}" for k, v in errors.items()]) if errors else None
+    }
+
+
 
 
 @app.post("/param_count_enhanced")
-async def param_count_enhanced(
+def api_param_count_enhanced(
     filename: str = Form(...),
-    class_name: str = Form(...)
+    modules_json: str = Form(...),
+    structures_json: str = Form(...),
 ):
-    from backend.parsers.param_counter import get_param_count_for_class
-    from backend.llm.gemini import gemini_free
 
-    file_path = os.path.join(UPLOAD_CODE, filename)
-
-    # -----------------------------
-    # 1) param_counter 기반 계산
-    # -----------------------------
-    pc_result = get_param_count_for_class(file_path, class_name)
-
-    # -----------------------------
-    # 2) LLM 추정 (프롬프트 생략)
-    # -----------------------------
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            code_text = f.read()
+        modules = json.loads(modules_json)
     except:
-        code_text = ""
+        modules = {}
 
-    llm_prompt = """
-You are an AI system that analyzes arbitrary PyTorch code and computes the 
-number of trainable parameters WITHOUT relying on any externally provided 
-model class name. You must infer everything directly from the code.
-
-Your tasks:
-
-===============================================================
-1) Identify the actual model used for training
-===============================================================
-From the entire code:
-
-- Identify which object serves as the REAL MODEL.
-- Acceptable candidates:
-  * Any class inheriting from nn.Module
-  * Any object created via composition (front/backbone/head)
-  * Any nn.Sequential used as the top-level model
-
-Rules:
-- Ignore helper functions such as evaluate(), train_epoch(), inference(), validate(), etc.
-- Ignore dataset/dataloader/optimizer/loss definitions.
-- Ignore modules that are only used inside another module (SEBlock, CBraModBlock, etc.).
-- If a model is created via:
-      model = RegressionHead(backbone)
-  then RegressionHead IS the real model.
-
-- If the model is:
-      model = nn.Sequential(front, se, backbone)
-  treat the Sequential composition as the FULL model.
-
-- If multiple nn.Module classes exist:
-  choose the one that produces final predictions and is instantiated before training.
-
-===============================================================
-2) Reconstruct model architecture and compute parameters
-===============================================================
-For every layer, compute parameter counts explicitly.
-
-Linear(in, out):
-  params = (in * out) + out
-
-Conv1d(in_channels, out_channels, kernel_size):
-  params = (in_channels * out_channels * kernel_size) + out_channels
-
-Conv2d(in, out, kH, kW):
-  params = (in * out * kH * kW) + out
-
-BatchNorm:
-  params = num_features * 2
-
-For custom modules:
-- Inspect __init__()
-- Identify submodules (Conv/Linear/etc.)
-- Recursively sum parameters
-
-If necessary, infer missing shapes logically from context.
-
-===============================================================
-3) If shapes cannot be determined reliably:
-===============================================================
-Set estimated_params = null  
-and explain which shapes caused ambiguity.
-
-===============================================================
-4) Final output (STRICT JSON)
-===============================================================
-Return ONLY JSON:
-
-{
-  "model_class": "<the model class or 'Sequential' or composition>",
-  "estimated_params": <int or null>,
-  "reasoning": "<step-by-step explanation of: 
-                  (a) how the model was identified, 
-                  (b) each layer's parameter calculation,
-                  (c) any inference or fallback logic used>"
-}
-
-NO markdown. NO backticks. NO text outside JSON.
-
-===============================================================
-Python Code:
-```python
-{code_text}
-
-
-"""
-
-    llm_raw = gemini_free(llm_prompt)
-
-    import json, re
-    llm_estimate = {"estimated_params": None, "reasoning": ""}
     try:
-        match = re.search(r"(\{.*\})", llm_raw, re.DOTALL)
-        if match:
-            llm_estimate = json.loads(match.group(1))
+        structures = json.loads(structures_json)
     except:
-        pass
+        structures = {}
 
-    # -----------------------------
-    # 3) 결과 병합
-    # -----------------------------
-    pc_val = None
-    try:
-        pc_val = pc_result["results"][class_name]["total_params"]
-    except:
-        pc_val = None
-
-    llm_val = llm_estimate.get("estimated_params")
-
-    # 병합 규칙
-    if pc_val and llm_val:
-        merged = pc_val
-        notes = f"LLM estimated {llm_val}, param_counter calculated {pc_val}."
-    elif pc_val:
-        merged = pc_val
-        notes = "LLM estimate unavailable; using param_counter value."
-    elif llm_val:
-        merged = llm_val
-        notes = "param_counter failed; using LLM estimate."
-    else:
-        merged = None
-        notes = "Both param_counter and LLM estimation failed."
-
-    return {
-        "merged": merged,
-        "param_counter": pc_result,
-        "llm_estimate": llm_estimate,
-        "notes": notes,
+    # 필터링: None / 빈 클래스 제거
+    modules = {
+        k: v for k, v in modules.items()
+        if isinstance(v, str) and v.strip()
     }
 
- 
+    # 구조도 필터링
+    structures = {
+        cls: structures.get(cls, {})
+        for cls in modules.values()
+    }
+
+    # LLM 기반 추정
+    res = estimate_params_with_llm(modules, structures)
+
+    return {
+        "estimated": res.get("estimated"),
+        "reasoning": res.get("reasoning"),
+        "notes": res.get("notes"),
+    }
+
