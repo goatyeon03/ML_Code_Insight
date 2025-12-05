@@ -15,9 +15,10 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 * 🗂️ Project-based Comparison: 실험 파일들을 프로젝트 단위로 정리하고 비교
 
 <br>
-<div style="text-align: center;" width="600">
-  <img src="photos/oss_main.png">
+<div style="text-align: center;">
+  <img src="photos/oss_main.png" width="600">
 </div>
+<br>
 <div style="text-align: center;">
   <img src="photos/oss_project.png" width="600">
 </div>
