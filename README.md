@@ -23,8 +23,8 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
   <img src="photos/oss_project.png" width="600">
 </p>
 
+("[Demo_Video](https://youtu.be/lYL9gcHs83A)")
 
-[Demo Video]("https://youtu.be/lYL9gcHs83A")
 
 ## 📄이용 가이드
 사용자는 다음 흐름에 따라 대시보드를 이용할 수 있습니다.
