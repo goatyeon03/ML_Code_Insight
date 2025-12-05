@@ -1,0 +1,30 @@
+[
+  {
+    "epoch": 1,
+    "train_loss": 0.95,
+    "val_loss": 0.88,
+    "val_mse": 0.88,
+    "test_rmse": 0.95
+  },
+  {
+    "epoch": 2,
+    "train_loss": 0.82,
+    "val_loss": 0.76,
+    "val_mse": 0.76,
+    "test_rmse": 0.87
+  },
+  {
+    "epoch": 3,
+    "train_loss": 0.74,
+    "val_loss": 0.69,
+    "val_mse": 0.69,
+    "test_rmse": 0.81
+  },
+  {
+    "epoch": 4,
+    "train_loss": 0.68,
+    "val_loss": 0.64,
+    "val_mse": 0.64,
+    "test_rmse": 0.78
+  }
+]
