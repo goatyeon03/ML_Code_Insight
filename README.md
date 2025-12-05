@@ -15,10 +15,14 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 * 🗂️ Project-based Comparison: 실험 파일들을 프로젝트 단위로 정리하고 비교
 
 <br>
+| 초기화면 | 대쉬보드 |
+|--------|---------|
+| <img src="photos/oss_main.png" width="400"> | <img src="photos/oss_project.png" width="400"> |
 
-<p float="left">
-  <img src="photos/oss_main.png" width="250" />
-  <img src="photos/oss_project.png" width="250" />
+
+<p style="text-align: center;">
+  <img src="photos/oss_main.png" width="400" />
+  <img src="photos/oss_project.png" width="400" />
 </p>
 
 
@@ -63,18 +67,23 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 아래는 이 프로젝트가 제공하는 기능을 기술적으로 정리한 목록입니다.
 
 ### 1. 사용자 계정 및 데이터 관리
-- 로그인/회원가입 <img scr="photos/oss_login.png" width="100" height="100">
+- 로그인/회원가입 <img scr="photos/oss_login.png" width="200">
 - SQLite 기반 사용자·프로젝트·파일 저장  
 - 업로드/삭제 시 DB와 자동 동기화  
 - 새로고침에도 페이지 상태 유지  
 
 ### 2. 프로젝트 및 파일 관리
-<p float="left">
+| 프로젝트 선택 | 새 프로젝트 생성 |
+|--------|---------|
+| <img src="photos/project_toggle.png" width="300"> | <img src="photos/create_project.png" width="300"> |
+
+
+<p style="text-align: center;">
   <img src="photos/project_toggle.png" width="200" />
   <img src="photos/create_project.png" width="200" />
 </p>
-- 프로젝트 생성/선택/삭제 <img scr="photos/delete.png" width="100" height="100">
-- 파일 업로드, 중복 처리(덮어쓰기/버전 생성/취소) <img scr="photos/duplicate.png" width="100" height="100">
+- 프로젝트 생성/선택/삭제 <img scr="photos/delete.png" width="200">
+- 파일 업로드, 중복 처리(덮어쓰기/버전 생성/취소) <img scr="photos/duplicate.png" width="200">
 - 업로드 진행 상태를 시각적으로 표시  
 - 파일 삭제 시 매칭된 결과 파일(JSON)도 함께 삭제  
 
@@ -82,16 +91,16 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 #### **모델 구조 분석**  
 - AST 기반 model_parser 적용  
 - 필요 시 LLM(Gemini) 보조 활용  
-- Graphviz 기반 모델 구조 노드 시각화 <img scr="photos/model_structure.png" width="100" height="100">
+- Graphviz 기반 모델 구조 노드 시각화 <img scr="photos/model_structure.png" width="200">
 - PyTorch 모델 구조를 한 화면에서 파악 가능  
 #### **파라미터 수 계산**  
-![parameters](photos/parameters.png)
+<img scr="photos/parameters.png" width="300">
 - sandbox worker(param_worker)로 격리된 계산 환경  
 - mock_torch 기반 안전한 모델 로딩  
-- 계산 불가 시 토글로 표시 <img scr="photos/fail_count.png" width="100" height="100">
+- 계산 불가 시 토글로 표시 <img scr="photos/fail_count.png" width="200">
 - LLM을 통한 추가 계산 시도 가능  
 #### **하이퍼파라미터 추출**  
-<img scr="photos/param_info.png" width="200" height="200">
+<img scr="photos/param_info.png" width="300">
 - epoch, batch_size, optimizer 등 자동 인식  
 - pretrain / train / finetune 구조 자동 분류  
 #### **캐싱**  
@@ -100,7 +109,7 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 
 ### 4. Result Visualization
 #### **JSON 로그 파싱**  
-<img scr="photos/plot.png" width="200" height="200">
+<img scr="photos/plot.png" width="300">
 - loss / classification / regression 자동 분류  
 - train/val 그래프 분리  
 - 여러 파일을 토글 방식으로 비교 가능  
@@ -109,13 +118,17 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 - 다양한 실험 결과를 직관적으로 비교 가능  
 
 ### 5. Final Performance
-<img scr="photos/oss_final.png" width="200" height="200">
+<img scr="photos/oss_final.png" width="300">
 - JSON 로그에서 test 성능만 추출  
 - 성능 높은 순으로 정렬  
 - 프로젝트 단위 실험 종합 요약  
 
 ### 6. 기타 기능
-<p float="left">
+| 업로드 파일 없을 때 | 도움말 |
+|--------|---------|
+| <img src="photos/no_file_main.png" width="300"> | <img src="photos/help.png" width="300"> |
+
+<p style="text-align: center;">
   <img src="photos/no_file_main.png" width="250" />
   <img src="photos/help.png" width="250" />
 </p>
