@@ -2,11 +2,7 @@ import ast
 import inspect
 import importlib.util
 import os
-import sys
 import tempfile
-import torch
-import torch.nn as nn
-from types import ModuleType
 
 def force_single_model(model_name: str):
     """
@@ -25,7 +21,7 @@ def force_single_model(model_name: str):
 
 
 # ============================================================
-# 🔥 Robust NN.Module inheritance detection
+# Robust NN.Module inheritance detection
 # ============================================================
 def is_module_subclass(node, imported_bases):
     """
@@ -53,7 +49,7 @@ def is_module_subclass(node, imported_bases):
 
 
 # ============================================================
-# 🔥 Dummy constructor args generator
+# Dummy constructor args generator
 # ============================================================
 def generate_dummy_args(cls):
     sig = inspect.signature(cls.__init__)
@@ -84,7 +80,7 @@ def generate_dummy_args(cls):
 
 
 # ============================================================
-# 🔥 Instantiate model with dummy arguments
+# Instantiate model with dummy arguments
 # ============================================================
 def instantiate_model(cls):
     try:
@@ -102,7 +98,7 @@ def instantiate_model(cls):
 
 
 # ============================================================
-# 🔥 Extract nn.Module classes using AST (robust)
+# Extract nn.Module classes using AST (robust)
 # ============================================================
 def extract_model_classes(src: str):
     tree = ast.parse(src)
@@ -136,7 +132,7 @@ def extract_model_classes(src: str):
 
 
 # ============================================================
-# 🔥 Load model class from temp module
+# Load model class from temp module
 # ============================================================
 def load_class_from_file(filepath, class_name):
     """
@@ -157,7 +153,7 @@ def load_class_from_file(filepath, class_name):
 
 
 # ============================================================
-# 🔥 Count params
+# Count params
 # ============================================================
 def count_params(model):
     try:
@@ -169,7 +165,7 @@ def count_params(model):
 
 
 # ============================================================
-# 🔥 Public API
+# Public API
 # ============================================================
 def get_param_count(file_path: str):
     """

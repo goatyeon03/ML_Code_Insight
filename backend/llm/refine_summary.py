@@ -11,7 +11,7 @@ def refine_summary_with_gemini(ast_summary, code_text):
 
     training_flow = ast_summary.get("training_flow", {})
     
-    # AST가 찾은 초기 값들을 프롬프트에 명확히 보여줌
+    # AST가 찾은 초기 값들을 모델에 전달
     initial_overall = ast_summary.get("training", {}).get("overall", {})
 
     prompt = f"""
@@ -92,108 +92,70 @@ Output ONLY valid JSON inside a code block.
     # LLM 호출
     output = gemini_free(prompt)
 
-
-    # ---------------------------------------------------------
-    # 강력한 JSON 파싱 로직 + 모델 이름 복원 + stages 반영
-    # ---------------------------------------------------------
-    try:
-        # 1) 먼저 ```json ... ``` 코드 블록 찾기
-        match = re.search(r"```json\s*\n*(\{.*?\})\s*```", output, re.DOTALL)
-        if match:
-            json_str = match.group(1)
+    # JSON 형태로 파싱
+    
+    # 1) 먼저 ```json ... ``` 코드 블록 찾기
+    match = re.search(r"```json\s*\n*(\{.*?\})\s*```", output, re.DOTALL)
+    if match:
+        json_str = match.group(1)
+        refined = json.loads(json_str)
+    else:
+        # 2) fallback — JSON 전체 범위 탐색
+        match2 = re.search(r"(\{.*\})", output, re.DOTALL)
+        if match2:
+            json_str = match2.group(1)
             refined = json.loads(json_str)
         else:
-            # 2) fallback — JSON 전체 범위 탐색
-            match2 = re.search(r"(\{.*\})", output, re.DOTALL)
-            if match2:
-                json_str = match2.group(1)
-                refined = json.loads(json_str)
-            else:
-                return ast_summary   # JSON 자체가 없음 → AST 반환
+            return ast_summary   # JSON 자체가 없음 -> AST 반환
 
 
-        # --- 기존 ast_summary 쪽 debug 정보 보존 ---
-        if "debug_model_parser" in ast_summary:
-            refined["debug_model_parser"] = ast_summary["debug_model_parser"]
+    # --- 기존 ast_summary 쪽 debug 정보 보존 ---
+    if "debug_model_parser" in ast_summary:
+        refined["debug_model_parser"] = ast_summary["debug_model_parser"]
 
-        # --- 💡 trainable_modules 보존 (여기가 핵심) ---
-        tm = ast_summary.get("model", {}).get("trainable_modules")
-        if tm:
-            refined.setdefault("model", {})
-            refined["model"]["trainable_modules"] = tm
+    # --- trainable_modules 보존 ---
+    tm = ast_summary.get("model", {}).get("trainable_modules")
+    if tm:
+        refined.setdefault("model", {})
+        refined["model"]["trainable_modules"] = tm
 
+    # DEBUG: 모델 이름 덮어쓰기 탐지
+    refined.setdefault("debug_llm_refine", [])
 
-        # ============================
-        # ⭐ DEBUG: 모델 이름 덮어쓰기 탐지
-        # ============================
-        refined.setdefault("debug_llm_refine", [])
+    before_model_name = refined.get("model", {}).get("name")
+    before_overall_class = refined.get("training", {}).get("overall", {}).get("model_class")
 
-        before_model_name = refined.get("model", {}).get("name")
-        before_overall_class = refined.get("training", {}).get("overall", {}).get("model_class")
+    # -------------------------------
+    # 모델 이름 복원 (AST 기반)
+    # -------------------------------
+    ast_model_name = ast_summary.get("model", {}).get("name")
 
+    if not refined.get("model"):
+        refined["model"] = {}
 
-        # -------------------------------
-        # ⭐ 모델 이름 복원 (AST 기반)
-        # -------------------------------
-        ast_model_name = ast_summary.get("model", {}).get("name")
+    if refined["model"].get("name") in (None, "", "null", {}, []):
+        refined["model"]["name"] = ast_model_name
 
-        if not refined.get("model"):
-            refined["model"] = {}
+    # -------------------------------
+    # training 구조 보정
+    # -------------------------------
+    if "training" not in refined:
+        refined["training"] = {}
 
-        if refined["model"].get("name") in (None, "", "null", {}, []):
-            refined["model"]["name"] = ast_model_name
+    refined["training"].setdefault("overall", {})
+    refined["training"].setdefault("stages", {})
+    refined["training"]["stages"].setdefault("pretrain", {})
+    refined["training"]["stages"].setdefault("train", {})
+    refined["training"]["stages"].setdefault("finetune", {})
 
-        # -------------------------------
-        # ⭐ training 구조 보정
-        # -------------------------------
-        if "training" not in refined:
-            refined["training"] = {}
+    # -------------------------------
+    # 모델 클래스는 딱 1곳에만 저장
+    # -------------------------------
+    if ast_model_name:
+        refined["training"]["overall"]["model_class"] = ast_model_name
 
-        refined["training"].setdefault("overall", {})
-        refined["training"].setdefault("stages", {})
-        refined["training"]["stages"].setdefault("pretrain", {})
-        refined["training"]["stages"].setdefault("train", {})
-        refined["training"]["stages"].setdefault("finetune", {})
-
-        # -------------------------------
-        # ⭐ 모델 클래스는 딱 1곳에만 저장
-        # -------------------------------
-        if ast_model_name:
-            refined["training"]["overall"]["model_class"] = ast_model_name
-
-        # return refined
+    return refined
     
-
-        # ============================
-        # ⭐ DEBUG: LLM이 모델 이름을 변경했는지 확인
-        # ============================
-        after_model_name = refined.get("model", {}).get("name")
-        after_overall_class = refined.get("training", {}).get("overall", {}).get("model_class")
-
-        if before_model_name and after_model_name and before_model_name != after_model_name:
-            refined["debug_llm_refine"].append(
-                f"[WARN] model.name changed: '{before_model_name}' → '{after_model_name}'"
-            )
-
-        if before_overall_class and after_overall_class and before_overall_class != after_overall_class:
-            refined["debug_llm_refine"].append(
-                f"[WARN] training.overall.model_class changed: '{before_overall_class}' → '{after_overall_class}'"
-            )
-        
-        return refined
-
-
-    except Exception as e:
-        with open("/home/goatyeon/ml_code_insight/backend/llm/refine_debug2.txt", "a") as f:
-            f.write("[DEBUG] JSON PARSE FAILED with EXCEPTION\n")
-            f.write("ERROR: " + str(e) + "\n")
-            f.write("RAW OUTPUT:\n" + output + "\n")
-
-        return ast_summary
-
-
-
-
 
 
 

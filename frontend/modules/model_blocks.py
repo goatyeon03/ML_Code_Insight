@@ -19,8 +19,6 @@ def render_model_tree(model_name, models, depth=0):
         st.error(f"Model not found: {model_name}")
         return
 
-    # st.markdown(f"### Class: `{model_name}`")
-
     blocks = model.get("blocks", [])
 
     # Block 테이블 출력
@@ -70,11 +68,6 @@ def render_pipeline_graphviz(pipeline, models, area):
                 bullet_lines.append(f"{ltype}({args})")   # ← 여기서 bullet 제거!
 
 
-        if bullet_lines:
-            # HTML label용 줄바꿈
-            bullet_html = "<BR ALIGN='LEFT'/>".join(bullet_lines)
-        else:
-            bullet_html = ""
 
         layers_html = "".join(
             f"<TR><TD ALIGN='LEFT'><FONT POINT-SIZE='10'>• {line}</FONT></TD></TR>"

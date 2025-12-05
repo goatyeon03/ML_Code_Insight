@@ -1,5 +1,3 @@
-# backend/api.py
-
 from fastapi import FastAPI, Query, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
@@ -7,13 +5,11 @@ import os
 import shutil
 import json
 import subprocess
-import sys
 
 from frontend.utils.db import get_conn, init_db
 
 from backend.routes.account import router as account_router
 from backend.llm.param_estimator import estimate_params_with_llm
-from backend.parsers.model_parser import parse_model_structure
 
 # 서버 시작 시 한 번만 스키마 초기화
 init_db()
@@ -24,7 +20,7 @@ UPLOAD_RESULT = os.path.join(BASE_DIR, "uploads", "results")
 os.makedirs(UPLOAD_CODE, exist_ok=True)
 os.makedirs(UPLOAD_RESULT, exist_ok=True)
 
-app = FastAPI(title="ML Code Insight API", version="0.2.0")
+app = FastAPI(title="Pytorch Experiment Dashboard API", version="0.2.0")
 
 app.include_router(account_router)
 

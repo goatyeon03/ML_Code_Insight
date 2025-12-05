@@ -1,12 +1,10 @@
-# backend/llm/param_estimator.py
-
 import json
 import re
 from backend.llm.gemini import gemini_free
 
 
 # ---------------------------------------------------------
-# 1) 프롬프트 템플릿 정의
+# 프롬프트 정의
 # ---------------------------------------------------------
 LLM_PARAM_COUNT_PROMPT = """
 You are an expert in analyzing PyTorch model code.
@@ -49,7 +47,7 @@ STRICT JSON OUTPUT:
 
 
 # ---------------------------------------------------------
-# MULTI-MODULE LLM ESTIMATOR
+# 여러 모델 클래스의 파라미터 수 추정
 # ---------------------------------------------------------
 def estimate_params_with_llm(modules: dict, structures: dict):
     """

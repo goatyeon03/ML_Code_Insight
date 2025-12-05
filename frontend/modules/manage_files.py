@@ -1,9 +1,7 @@
-# modules/manage_files.py
-# 🔥 DB write는 모두 FastAPI로 이동한 안정 버전
-
 import streamlit as st
 import time
 import requests
+import pandas as pd
 
 from utils.db import get_conn  # READ ONLY
 from utils.file_ops import (
@@ -13,7 +11,7 @@ from utils.file_ops import (
     delete_file_api,
     API_URL
 )
-import pandas as pd
+
 from modules.manage_account import render_account_delete_modal
 from modules.diff_utils import compare_code_text
 from modules.version_utils import generate_new_version_name 
@@ -31,7 +29,7 @@ def render_project_sidebar():
     st.sidebar.markdown("### 📁 Projects")
 
     # --------------------------------------------
-    # 🔥 0. 프로젝트 생성 모드 처리 (최우선)
+    # 0. 프로젝트 생성 모드 처리 (최우선)
     # --------------------------------------------
     if st.session_state.get("pending_create_project"):
         # 프로젝트 생성 UI만 렌더링
@@ -308,10 +306,8 @@ def render_project_files(project_id, user_id):
         return
 
     # --------------------------------------------
-    # 🔥 파일 리스트를 체크박스 형태로 렌더링
+    # 파일 리스트를 체크박스 형태로 렌더링
     # --------------------------------------------
-    # st.sidebar.markdown("*Select Files to Delete")
-
     if "selected_files" not in st.session_state:
         st.session_state.selected_files = set()
 
@@ -335,7 +331,7 @@ def render_project_files(project_id, user_id):
 
 
     # --------------------------------------------
-    # 🔥 삭제 버튼 렌더링
+    # 삭제 버튼 렌더링
     # --------------------------------------------
     if selected_files:
         if st.sidebar.button("🗑 Delete Selected Files", use_container_width=True):
@@ -348,7 +344,7 @@ def render_project_files(project_id, user_id):
     
 
     # --------------------------------------------
-    # 🔥 삭제 모달
+    # 삭제 모달
     # --------------------------------------------
     if st.session_state.get("pending_delete_multiple"):
         to_delete = st.session_state["pending_delete_multiple"]
@@ -379,8 +375,7 @@ def render_project_files(project_id, user_id):
 
 # ----------------------------------------------------------
 # 4) Danger Zone (사이드바 맨 아래에 표시)
-#    - 프로젝트 삭제 버튼 + 계정 삭제 버튼
-#    - 실제 삭제 모달도 여기서 호출
+#    프로젝트 삭제 버튼 + 계정 삭제 버튼
 # ----------------------------------------------------------
 def render_danger_zone(user_id: int):
     project_id = st.session_state.get("selected_project")
@@ -417,7 +412,7 @@ def _render_project_delete_modal(user_id: int, project_id: int):
 
     colA, colB = box.columns(2)
 
-    # ✅ 실제 삭제
+    # 실제 삭제
     if colA.button("Yes", key=f"confirm_project_del_{project_id}"):
         res = delete_project_api(user_id, project_id)
 
@@ -426,13 +421,13 @@ def _render_project_delete_modal(user_id: int, project_id: int):
         else:
             st.sidebar.success("Project deleted!")
 
-        # 🔥 상태 초기화 → 모달 닫히고 프로젝트 선택 해제
+        # 상태 초기화 -> 모달 닫히고 프로젝트 선택 해제
         st.session_state["pending_project_delete"] = None
         st.session_state["selected_project"] = None
         st.session_state["selected_code_file"] = None
         st.rerun()
 
-    # ❌ 취소
+    # 취소
     if colB.button("Cancel", key=f"cancel_project_del_{project_id}"):
         st.session_state["pending_project_delete"] = None
         st.rerun()

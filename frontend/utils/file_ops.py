@@ -1,13 +1,8 @@
-# utils/file_ops.py (🔥 최종 안정 버전 — front는 DB write 절대 없음)
-
 import requests
 
 API_URL = "http://localhost:8000"
 
 
-# ------------------------------------------------------------
-# 1) 코드 파일 업로드 (write → FastAPI)
-# ------------------------------------------------------------
 def upload_code_api(user_id, project_id, cf, override_name=None):
     filename = override_name if override_name else cf.name
 
@@ -27,11 +22,6 @@ def upload_code_api(user_id, project_id, cf, override_name=None):
     except Exception as e:
         return {"error": str(e)}
 
-
-
-# ------------------------------------------------------------
-# 2) 파일 삭제 (write → FastAPI)
-# ------------------------------------------------------------
 def delete_file_api(user_id, file_id):
     """
     기존에는 frontend에서 직접 DB DELETE을 했음 (❌)
@@ -49,9 +39,6 @@ def delete_file_api(user_id, file_id):
         return {"error": str(e)}
 
 
-# ------------------------------------------------------------
-# 3) 결과 파일 업로드 (write → FastAPI)
-# ------------------------------------------------------------
 def upload_result_api(user_id, project_id, rf):
     """
     Streamlit FileUploader 객체 rf를 FastAPI로 보냄.

@@ -1,5 +1,6 @@
 import ast
-from backend.llm.model_name_extractor import llm_extract_model_class
+import re
+
 from backend.parsers.module_collector import collect_trainable_modules
 
 
@@ -11,9 +12,8 @@ def extract_model_classes(text):
     - net = ClassName(...)
     - model = ClassName().to(...)
     - encoder = ClassName().cuda()
-    - 클래스 이름은 대문자로 시작한다고 가정 (PyTorch 일반 관례)
     """
-    import re
+    
     
     candidates = []
 
@@ -40,7 +40,7 @@ def extract_model_classes(text):
 
 class MLCodeParser(ast.NodeVisitor):
     """
-    V3: AST는 '값' + '학습 흐름 단서(training flow signals)'를 추출한다.
+    AST는 '값' + '학습 흐름 단서(training flow signals)'를 추출한다.
     Stage(pretrain/train/finetune) 판단은 하지 않으며,
     판단을 위한 신호를 LLM에 제공한다.
     """
@@ -89,32 +89,22 @@ class MLCodeParser(ast.NodeVisitor):
 
         # 상속 구조 디버깅
         for base in node.bases:
-            # try:
-            #     # print(f"[DEBUG]   base: {ast.unparse(base)}")
-            # except:
-            #     pass
-
             if isinstance(base, ast.Attribute) and base.attr == "Module":
-                # print("[DEBUG]   → inherits nn.Module via Attribute")
                 is_model_class = True
             if isinstance(base, ast.Name) and base.id == "Module":
-                # print("[DEBUG]   → inherits nn.Module via Name")
                 is_model_class = True
 
         # __init__ 내부 확인
         for body_item in node.body:
             if isinstance(body_item, ast.FunctionDef) and body_item.name == "__init__":
-                # print(f"[DEBUG]   Checking __init__ of {class_name}")
                 try:
                     text = ast.unparse(body_item)
                     if any(x in text for x in ["nn.Conv", "nn.Linear", "nn.BatchNorm"]):
-                        # print(f"[DEBUG]   → {class_name} has NN layers ⇒ model class detected")
                         is_model_class = True
                 except:
                     pass
 
         if is_model_class:
-            # print(f"[DEBUG] >>> MODEL CLASS DETECTED: {class_name}")
             self.summary["model"]["name"] = class_name
 
         self.generic_visit(node)
@@ -281,33 +271,25 @@ class MLCodeParser(ast.NodeVisitor):
 
         overall = self.summary["training"]["overall"]
 
-        # print("[DEBUG] Before finalize overall:", overall)
-
         # epochs
         for k, v in self.variables.items():
             if "epoch" in k.lower():
-                # print(f"[DEBUG] epoch var detected: {k} = {v}")
                 overall["epochs"] = v
 
         # lr
         for k, v in self.variables.items():
             if "lr" in k.lower() or "learning_rate" in k.lower():
-                # print(f"[DEBUG] lr var detected: {k} = {v}")
                 overall["learning_rate"] = v
 
         # batch
         for k, v in self.variables.items():
             if "batch" in k.lower() or "bs" in k.lower():
-                # print(f"[DEBUG] batch var detected: {k} = {v}")
                 overall["batch_size"] = v
 
         # device
         for k, v in self.variables.items():
             if "device" in k.lower():
-                # print(f"[DEBUG] device var detected: {k} = {v}")
                 overall["device"] = v
-
-        # print("[DEBUG] After finalize overall:", overall)
 
 
     # ---------------------------------------------------------

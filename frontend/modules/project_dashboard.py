@@ -1,5 +1,3 @@
-# modules/project_dashboard.py  (수정 버전)
-
 import json
 import pandas as pd
 import streamlit as st
@@ -8,8 +6,8 @@ import requests
 import time
 import os
 
-from utils.db import get_conn  # ✔ SELECT 용도로만 사용됨
-from utils.file_ops import upload_result_api  # ✔ write는 FastAPI에서만 수행
+from utils.db import get_conn
+from utils.file_ops import upload_result_api 
 from utils.match_utils import match_code_and_results
 
 
@@ -169,14 +167,14 @@ def render_project_dashboard(project_id: int, user_id: int):
     stages = training.get("stages", {}) or {}
     overall = training.get("overall", {}) or {}
 
-    model_class_name = (
-        model_info.get("class_name")
-        or model_info.get("name")
-        or overall.get("model_class")
-        or stages.get("train", {}).get("model_class")
-        or stages.get("finetune", {}).get("model_class")
-        or stages.get("pretrain", {}).get("model_class")
-    )
+    # model_class_name = (
+    #     model_info.get("class_name")
+    #     or model_info.get("name")
+    #     or overall.get("model_class")
+    #     or stages.get("train", {}).get("model_class")
+    #     or stages.get("finetune", {}).get("model_class")
+    #     or stages.get("pretrain", {}).get("model_class")
+    # )
 
 
 
@@ -246,7 +244,7 @@ def render_project_dashboard(project_id: int, user_id: int):
     # (오른쪽) Model + Training Parameters (Stage-aware)
     # -------------------------
     with col_right:
-        st.markdown("#### ⚙️ Training Parameters")
+        st.markdown("#### ⚙️ Training Parameters (It takes time to compute)")
 
         training = summary.get("training", {})
         stages = training.get("stages", {})
@@ -381,15 +379,10 @@ def render_project_dashboard(project_id: int, user_id: int):
             return any(v not in (None, "null") for v in stage_dict.values())
 
         stages = summary.get("training", {}).get("stages", {})
-        overall = summary.get("training", {}).get("overall", {})
 
         # 표시할 탭 목록 구성
         tab_labels = []
         tab_contents = []
-
-        # # Always include Overall
-        # tab_labels.append("Overall")
-        # tab_contents.append(overall)
 
         if has_meaningful_values(stages.get("pretrain", {})):
             tab_labels.append("Pretrain")
@@ -532,7 +525,7 @@ def render_project_dashboard(project_id: int, user_id: int):
         base = base.replace("_output", "")
         return base
 
-    code_prefixes = {normalize_prefix(cf) for cf in code_files}
+    # code_prefixes = {normalize_prefix(cf) for cf in code_files}
     result_prefixes = {normalize_prefix(rf) for rf in result_files}
 
     unmatched_codes = [
@@ -546,7 +539,7 @@ def render_project_dashboard(project_id: int, user_id: int):
             "\n".join([f"- `{f}`" for f in unmatched_codes])
         )
 
-    # 🔥 conn 새로 열기 (절대 기존 conn 재사용 금지)
+    # conn 새로 열기 (절대 기존 conn 재사용 금지)
     conn2 = get_conn()
     df_results = pd.read_sql("""
         SELECT f.id, f.filename, f.preview_json
@@ -564,7 +557,7 @@ def render_project_dashboard(project_id: int, user_id: int):
 
     metric_records = []
 
-    # 🔥 페어별 Accordion UI
+    # 페어별 Accordion UI
     for code_name, result_list in pairs.items():
         with st.expander(f"{code_name}", expanded=False):
             for rname in result_list:
@@ -584,7 +577,7 @@ def render_project_dashboard(project_id: int, user_id: int):
                 tabs = st.tabs(["Loss", "Classification", "Regression", "Other"])
 
                 # ------------------------------------
-                # 🔷 1) Classification Tab
+                # 1) Classification Tab
                 # ------------------------------------
                 with tabs[1]:
                     acc_cols = groups["acc"]
@@ -610,7 +603,7 @@ def render_project_dashboard(project_id: int, user_id: int):
                         st.info("No classification metrics found.")
 
                 # ------------------------------------
-                # 🔶 2) Loss Tab  (loss만 전담)
+                # 2) Loss Tab  (loss만 전담)
                 # ------------------------------------
                 with tabs[0]:
 
@@ -634,7 +627,7 @@ def render_project_dashboard(project_id: int, user_id: int):
                         st.info("No train/val loss metrics found.")
 
                 # ------------------------------------
-                # 🔶 3) Regression Tab (mse/mae/rmse/r2)
+                # 3) Regression Tab (mse/mae/rmse/r2)
                 # ------------------------------------
                 with tabs[2]:
 
@@ -674,7 +667,7 @@ def render_project_dashboard(project_id: int, user_id: int):
                         st.info("No regression metrics (train/val) available.")
 
                 # ------------------------------------
-                # 🔘 4) Other Tab
+                # 4) Other Tab
                 # ------------------------------------
                 with tabs[3]:
                     if groups["other"]:

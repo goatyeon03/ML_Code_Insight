@@ -81,11 +81,6 @@ def init_db():
         );
         """)
 
-        # # project_files 유니크 인덱스
-        # cur.execute("""
-        # CREATE UNIQUE INDEX IF NOT EXISTS ux_project_files_unique
-        # ON project_files(project_id, file_id);
-        # """)
 
         conn.commit()
 

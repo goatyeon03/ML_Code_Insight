@@ -24,9 +24,6 @@ import sys
 import traceback
 import torch
 
-
-
-# ⚠️ 실제 프로젝트에서는 이 임포트 경로를 맞춰야 함
 from model_parser import parse_model_structure
 
 

@@ -1,4 +1,3 @@
-# app.py  (🔥 최종 안정 버전)
 import streamlit as st
 from utils.auth import ensure_session
 from modules.manage_files import (
@@ -96,7 +95,7 @@ ensure_session()
 
 
 # -----------------------------------------------------------
-# 🔁 브라우저 새로고침 시 selected_project 복원
+# 브라우저 새로고침 시 selected_project 복원
 # -----------------------------------------------------------
 if "project" in st.query_params:
     try:
@@ -107,7 +106,7 @@ if "project" in st.query_params:
 
 
 # -----------------------------------------------------------
-# 🔥 사이드바
+# 사이드바
 # -----------------------------------------------------------
 def render_sidebar():
     if not st.session_state.get("user_id"):
@@ -142,7 +141,7 @@ def render_sidebar():
 
 
 # -----------------------------------------------------------
-# 🔥 메인 화면
+# 메인 화면
 # -----------------------------------------------------------
 def main():
 
@@ -204,7 +203,7 @@ def main():
         </h1>
 
         <p style="font-size: 20px; color: #555; margin-bottom: 25px;">
-        To get started with <strong>ML Code Insight</strong>, follow the steps below:
+        To get started with <strong>Pytorch Experiment Dashboard</strong>, follow the steps below:
         </p>
 
         <ol style="font-size: 18px; color: #444; line-height: 1.7; margin-bottom: 30px;">
@@ -223,7 +222,7 @@ def main():
     render_project_dashboard(project_id, st.session_state["user_id"])
 
     # --------------------------------------------------------
-    # 🔥 Add JS Event Listener for postMessage
+    # Add JS Event Listener for postMessage
     # --------------------------------------------------------
     streamlit_message_listener = """
     <script>

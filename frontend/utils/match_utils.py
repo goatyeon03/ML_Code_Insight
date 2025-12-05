@@ -1,4 +1,3 @@
-# utils/match_utils.py
 import re
 from collections import defaultdict
 
