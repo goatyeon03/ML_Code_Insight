@@ -8,7 +8,7 @@ from modules.manage_files import (
 
 from modules.project_dashboard import render_project_dashboard
 
-st.set_page_config(page_title="ML Code Insight", layout="wide")
+st.set_page_config(page_title="Pytorch Experiment Dashboard", layout="wide")
 
 st.markdown("""
 <style>
@@ -54,7 +54,7 @@ st.markdown("""
         • 코드 파일 업로드 → 자동 분석<br>
         • 결과 JSON 업로드 → 자동 매칭/시각화<br>
         • 리더보드에서 성능 확인<br><br>
-        <div>⭐ 만일 오류가 있다면 uaua1595@naver.com 으로 연락주세요!</div>
+        <div>⭐ 만일 오류가 있다면 uaua1595@seoultech.ac.kr 로 연락주세요!</div>
     </div>
     
 </div>
