@@ -3,6 +3,10 @@ import os
 from fastapi import APIRouter
 from frontend.utils.db import get_conn
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_CODE = os.path.join(BASE_DIR, "uploads", "code")
+UPLOAD_RESULT = os.path.join(BASE_DIR, "uploads", "results")
+
 router = APIRouter()
 
 class UserDeleteRequest(BaseModel):
@@ -43,11 +47,19 @@ async def delete_account(req: UserDeleteRequest):
 
     # 4) 파일 삭제
     for fid in deletable_files:
-        row = cur.execute("SELECT filepath FROM files WHERE id=?", (fid,)).fetchone()
+        row = cur.execute("SELECT filename FROM files WHERE id=?", (fid,)).fetchone()
         if row:
-            path = row[0]
-            if os.path.exists(path):
-                os.remove(path)
+            filename = row[0]
+
+            # 코드 파일 / 결과 파일 자동 경로 생성
+            if filename.endswith(".py"):
+                full_path = os.path.join(UPLOAD_CODE, filename)
+            else:
+                full_path = os.path.join(UPLOAD_RESULT, filename)
+
+            if os.path.exists(full_path):
+                os.remove(full_path)
+
         cur.execute("DELETE FROM files WHERE id=?", (fid,))
 
     # 5) 프로젝트 삭제

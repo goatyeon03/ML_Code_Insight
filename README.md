@@ -15,16 +15,16 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 * 🗂️ Project-based Comparison: 실험 파일들을 프로젝트 단위로 정리하고 비교
 
 <br>
-<div style="text-align: center;">
+<p style="text-align: center;">
   <img src="photos/oss_main.png" width="600">
-</div>
+</p>
 <br>
-<div style="text-align: center;">
+<p style="text-align: center;">
   <img src="photos/oss_project.png" width="600">
-</div>
+</p>
 
 
-[Demo Video]()
+[Demo Video]("https://youtu.be/lYL9gcHs83A")
 
 ## 📄이용 가이드
 사용자는 다음 흐름에 따라 대시보드를 이용할 수 있습니다.
@@ -75,8 +75,10 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 |--------|---------|
 | <img src="photos/project_toggle.png" width="200"> | <img src="photos/create_project.png" width="200"> |
 
-- 프로젝트 생성/선택/삭제 <img src="photos/delete.png" width="200">
-- 파일 업로드, 중복 처리(덮어쓰기/버전 생성/취소) <img src="photos/duplicate.png" width="200">
+- 프로젝트 생성/선택/삭제 
+<img src="photos/delete.png" width="200">
+- 파일 업로드, 중복 처리(덮어쓰기/버전 생성/취소) 
+<img src="photos/duplicate.png" width="200">
 - 업로드 진행 상태를 시각적으로 표시  
 - 파일 삭제 시 매칭된 결과 파일(JSON)도 함께 삭제  
 
@@ -84,34 +86,40 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 #### **모델 구조 분석**  
 - AST 기반 model_parser 적용  
 - 필요 시 LLM(Gemini) 보조 활용  
-- Graphviz 기반 모델 구조 노드 시각화 <img src="photos/model_structure.png" width="200">
+- Graphviz 기반 모델 구조 노드 시각화 
+<img src="photos/model_structure.png" width="500">
 - PyTorch 모델 구조를 한 화면에서 파악 가능  
+
 #### **파라미터 수 계산**  
 <img src="photos/parameters.png" width="300">
 - sandbox worker(param_worker)로 격리된 계산 환경  
 - mock_torch 기반 안전한 모델 로딩  
-- 계산 불가 시 토글로 표시 <img scr="photos/fail_count.png" width="200">
-- LLM을 통한 추가 계산 시도 가능  
+- 계산 불가 시 토글로 표시
+<img scr="photos/fail_count.png" width="200">
+- LLM을 통한 추가 계산 시도 가능
+
 #### **하이퍼파라미터 추출**  
 <img src="photos/param_info.png" width="300">
 - epoch, batch_size, optimizer 등 자동 인식  
-- pretrain / train / finetune 구조 자동 분류  
+- pretrain / train / finetune 구조 자동 분류 
+
 #### **캐싱**  
 - 구조/파라미터/요약 정보 캐싱  
 - 동일 파일 재로드 시 즉시 불러오기  
 
 ### 4. Result Visualization
 #### **JSON 로그 파싱**  
-<img src="photos/plot.png" width="300">
+<img src="photos/plot.png" width="500">
 - loss / classification / regression 자동 분류  
 - train/val 그래프 분리  
-- 여러 파일을 토글 방식으로 비교 가능  
+- 여러 파일을 토글 방식으로 비교 가능
+
 #### **인터랙티브 그래프**  
 - 마우스 오버(hover) 시 세부 수치 표시  
 - 다양한 실험 결과를 직관적으로 비교 가능  
 
 ### 5. Final Performance
-<img src="photos/oss_final.png" width="300">
+<img src="photos/oss_final.png" width="500">
 - JSON 로그에서 test 성능만 추출  
 - 성능 높은 순으로 정렬  
 - 프로젝트 단위 실험 종합 요약  
@@ -222,7 +230,8 @@ Pytorch_Experiment_Dashboard/
 
 ## 📜 라이선스
 
-MIT License
+라이선스
+
 
 
 ## 👤 작성자

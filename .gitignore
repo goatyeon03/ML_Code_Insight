@@ -1,6 +1,7 @@
 sample_codes/
 .env
 __init__.py
+oss_demo.mp4
 
 ml_insight.db
 ml_insight.db-shm
@@ -20,6 +21,6 @@ __pycache__/
 # VSCode 설정 폴더 무시
 .vscode/
 
-*.txt
+
 
 Procfile
