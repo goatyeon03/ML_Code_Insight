@@ -28,8 +28,9 @@ source venv/bin/activate      # macOS/Linux
 venv\Scripts\activate         # Windows
 ```
 <br>
-일부 기능은 Google AI Studio Gemini API를 사용합니다.<br>
+*일부 기능은 Google AI Studio Gemini API를 사용합니다.<br>
 해당 기능을 사용하려면 아래 사이트에서 무료 API Key를 발급받아 환경 변수로 설정해야 합니다.
+<br>
 
 **API Key 발급**
 <br>
