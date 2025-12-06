@@ -34,11 +34,13 @@ venv\Scripts\activate         # Windows
 
 <br>
 
-**API Key 발급**
+**API Key 발급:**
 <br>
-[Google AI Studio](https://aistudio.google.com/app/apikey)
+https://aistudio.google.com/app/apikey
 
-**환경 변수 설정**
+<br>
+
+**환경 변수 설정:**
 <br>
 macOS / Linux:
 ```bash
@@ -48,6 +50,8 @@ Windows PowerShell:
 ```powershell
 setx GOOGLE_API_KEY "발급받은_API_키"
 ```
+
+<br>
 
 ### 3) 백엔드 실행 (FastAPI)
 
