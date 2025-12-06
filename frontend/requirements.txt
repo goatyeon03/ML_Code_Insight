@@ -3,3 +3,6 @@ requests
 pandas
 numpy
 Pillow
+plotly
+graphviz
+protobuf

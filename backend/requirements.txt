@@ -1,7 +1,12 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 pydantic
+jinja2
 numpy
-regex
-torch
+google-generativeai
+graphviz
+
+# PyTorch (CPU)
+torch==2.2.0+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu

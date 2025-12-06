@@ -2,7 +2,46 @@
 머신러닝 프로젝트가 끝난 뒤, 코드 파일의 내용이 잘 기억나지 않아 정리에 어려움을 겪진 않으셨나요?
 <br><br>이 프로그램은 <u>Pytorch 기반 머신러닝 코드 파일</u>을 자동 분석하여 **모델 구조**, **훈련 설정**, **파라미터 통계**, **결과 시각화** 등을 시각적으로 제공하는 도구입니다. 다양한 실험 코드를 보다 쉽게 비교하고, 모델 구조를 빠르게 이해할 수 있도록 돕기 위해 개발되었습니다.
 
+> **참고**
+> 이 프로그램은 로컬 실행을 전제로 설계되었습니다.
+> 별도의 배포 URL이 없으므로, 아래 안내에 따라 직접 실행해서 이용할 수 있습니다.
+
 <br>
+
+## 🚀 로컬 실행 방법
+이 프로그램은 FastAPI(백엔드) + Streamlit(프론트엔드) 기반으로 동작합니다.
+아래 순서 그대로 수행하면 로컬 환경에서 사용할 수 있습니다.
+
+### 1) 저장소 클론
+
+```bash
+git clone https://github.com/goatyeon03/ML_Code_Insight.git
+cd ML_Code_Insight
+```
+### 2) 백엔드 실행 (FastAPI)
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+FastAPI 문서 접속:
+```
+http://127.0.0.1:8000/docs
+```
+
+### 3) 프론트엔드 실행 (Streamlit)
+
+```bash
+cd frontend
+pip install -r requirements.txt
+streamlit run app.py
+```
+Streamlit UI:
+```
+http://localhost:8501
+```
+
 
 ## 📌 핵심 기능 요약
 Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니다:
@@ -134,40 +173,8 @@ Pytorch Experiment Dashboard는 다음과 같은 분석 기능을 제공합니�
 
 <br>
 
-## 🌐 사이트 접속 방법
 
 
-## 🚀 로컬 실행 방법
-
-### 1) 저장소 클론
-
-```bash
-git clone https://github.com/goatyeon03/ML_Code_Insight.git
-cd ML_Code_Insight
-```
-### 2) 백엔드 실행 (FastAPI)
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
-FastAPI 문서 접속:
-```
-http://127.0.0.1:8000/docs
-```
-
-### 3) 프론트엔드 실행 (Streamlit)
-
-```bash
-cd frontend
-pip install -r requirements.txt
-streamlit run app.py
-```
-Streamlit UI:
-```
-http://localhost:8501
-```
 
 ## 📁 프로젝트 구조
 
@@ -226,6 +233,7 @@ Pytorch_Experiment_Dashboard/
 - [ ] 다중 코드 파일 고려  
 - [ ] 파라미터 수 계산 기능 강화
 - [ ] 결과 파일 자동 매치 기능 강화
+- [ ] 배포
 
 
 ## 📜 라이선스
