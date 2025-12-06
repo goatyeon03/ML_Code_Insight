@@ -13,12 +13,22 @@
 아래 순서 그대로 수행하면 로컬 환경에서 사용할 수 있습니다.
 
 ### 1) 저장소 클론
-
 ```bash
 git clone https://github.com/goatyeon03/ML_Code_Insight.git
 cd ML_Code_Insight
 ```
-### 2) 백엔드 실행 (FastAPI)
+
+### 2) 실행 환경 세팅
+> Python 3.11 이상을 요구합니다.
+> 가상환경 생성 이후 실행해주세요.
+
+```bash
+python3.11 -m venv venv
+source venv/bin/activate      # macOS/Linux
+venv\Scripts\activate         # Windows
+```
+
+### 3) 백엔드 실행 (FastAPI)
 
 ```bash
 cd backend
@@ -30,7 +40,7 @@ FastAPI 문서 접속:
 http://127.0.0.1:8000/docs
 ```
 
-### 3) 프론트엔드 실행 (Streamlit)
+### 4) 프론트엔드 실행 (Streamlit)
 
 ```bash
 cd frontend
