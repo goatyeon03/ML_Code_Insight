@@ -6,9 +6,3 @@ Pillow
 plotly
 graphviz
 protobuf
-
-fastapi
-uvicorn[standard]
-python-multipart
-pydantic
-google-generativeai
