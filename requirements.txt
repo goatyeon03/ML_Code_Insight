@@ -3,9 +3,6 @@ uvicorn[standard]
 python-multipart
 pydantic
 jinja2
-numpy
+requests
 google-generativeai
-graphviz
-
-# PyTorch (CPU)
-torch==2.2.0
+protobuf
