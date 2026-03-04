@@ -3,17 +3,9 @@ uvicorn[standard]
 python-multipart
 pydantic
 jinja2
-
-streamlit==1.40.0
-requests
-pandas
 numpy
-Pillow
-plotly
-
 google-generativeai
 graphviz
-protobuf
 
 # PyTorch (CPU)
 torch==2.2.0
