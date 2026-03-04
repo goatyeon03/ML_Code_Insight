@@ -1,5 +1,5 @@
 import os
-from google import genai
+import google.generativeai as genai
 from google.genai import types 
 
 # API 키는 환경 변수에서
