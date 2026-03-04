@@ -1,20 +1,26 @@
 from pydantic import BaseModel
 import os
 from fastapi import APIRouter
-from frontend.utils.db import get_conn
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_CODE = os.path.join(BASE_DIR, "uploads", "code")
-UPLOAD_RESULT = os.path.join(BASE_DIR, "uploads", "results")
+from backend.db import get_conn
 
 router = APIRouter()
+
+def _get_upload_dirs():
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # .../backend
+    upload_root = os.getenv("UPLOAD_ROOT", os.path.join(backend_dir, "uploads"))
+    upload_code = os.path.join(upload_root, "code")
+    upload_result = os.path.join(upload_root, "results")
+    return upload_code, upload_result
+
 
 class UserDeleteRequest(BaseModel):
     user_id: int
 
+
 @router.delete("/delete_account")
 async def delete_account(req: UserDeleteRequest):
     user_id = req.user_id
+    upload_code, upload_result = _get_upload_dirs()
 
     conn = get_conn()
     cur = conn.cursor()
@@ -53,9 +59,9 @@ async def delete_account(req: UserDeleteRequest):
 
             # 코드 파일 / 결과 파일 자동 경로 생성
             if filename.endswith(".py"):
-                full_path = os.path.join(UPLOAD_CODE, filename)
+                full_path = os.path.join(upload_code, filename)
             else:
-                full_path = os.path.join(UPLOAD_RESULT, filename)
+                full_path = os.path.join(upload_result, filename)
 
             if os.path.exists(full_path):
                 os.remove(full_path)

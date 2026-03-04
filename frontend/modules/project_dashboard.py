@@ -7,12 +7,10 @@ import time
 import os
 
 from utils.db import get_conn
-from utils.file_ops import upload_result_api 
+from utils.file_ops import upload_result_api , API_URL
 from utils.match_utils import match_code_and_results
 
 
-
-API_URL = "http://localhost:8000"
 
 def group_metrics(metric_names):
     groups = {"acc": [], "f1": [], "loss": [], "other": []}

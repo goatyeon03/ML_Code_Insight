@@ -1,6 +1,7 @@
+import os
 import requests
 
-API_URL = "http://localhost:8000"
+API_URL = os.genenv("API_URL", "http://localhost:8000").rstrip("/")
 
 
 def upload_code_api(user_id, project_id, cf, override_name=None):
@@ -9,57 +10,38 @@ def upload_code_api(user_id, project_id, cf, override_name=None):
     files = {
         "file": (filename, cf.getvalue(), "text/x-python")
     }
-    data = {"user_id": user_id, "project_id": project_id}
+    data = {
+        "user_id": user_id, 
+        "project_id": project_id,
+        "override_name": filename,
+    }
 
-    try:
-        res = requests.post(
-            f"{API_URL}/upload_code",
-            data=data,
-            files=files,
-            timeout=60,
-        )
-        return res.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-def delete_file_api(user_id, file_id):
-    """
-    기존에는 frontend에서 직접 DB DELETE을 했음 (❌)
-    이제는 백엔드 API를 호출해 삭제 (✔)
-    """
-
-    try:
-        res = requests.post(
-            f"{API_URL}/delete_file",
-            data={"user_id": user_id, "file_id": file_id},
-            timeout=15,
-        )
-        return res.json()
-    except Exception as e:
-        return {"error": str(e)}
+    r= requests.post(f"{API_URL}/uploda_code", files=files, data=data, timeout=60)
+    r.raise_for_status()
+    return r.json()
 
 
-def upload_result_api(user_id, project_id, rf):
+
+def upload_result_api(user_id, project_id, rf, override_name=None):
     """
     Streamlit FileUploader 객체 rf를 FastAPI로 보냄.
     DB write는 오직 FastAPI만 수행.
     """
+    filename = override_name if override_name else rf.name
 
     files = {
-        "file": (rf.name, rf.getvalue(), "application/json")
+        "file": (filename, rf.getvalue(), "application/json")
     }
-    data = {"user_id": user_id, "project_id": project_id}
+    data = {
+        "user_id": user_id, 
+        "project_id": project_id,
+        "override_name": filename,    
+    }
 
-    try:
-        res = requests.post(
-            f"{API_URL}/upload_result",
-            data=data,
-            files=files,
-            timeout=30,
-        )
-        return res.json()
-    except Exception as e:
-        return {"error": str(e)}
+    r = requests.post(f"{API_URL}/upload_result", files=files, data=data, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
 
 def create_project_api(user_id, project_name):
     try:

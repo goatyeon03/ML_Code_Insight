@@ -3,10 +3,11 @@ import streamlit as st
 import pandas as pd
 import requests
 from utils.db import get_conn
+from utils.file_ops import API_URL
 
 import graphviz as gv
 
-API_URL = "http://localhost:8000"
+
 
 
 

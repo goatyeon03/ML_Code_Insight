@@ -1,9 +1,11 @@
-# utils/db.py
+# ml_code_insight/backend/db.py
 import os
 import sqlite3
 import json
 from typing import List, Dict, Optional
 
+# Railway에서는 기본 파일시스템이 휘발성일 수 있어서,
+# 최소한 경로는 환경변수로 뺄 수 있게 해둡니다.
 DB_PATH = os.getenv("DB_PATH", "ml_insight.db")
 
 
@@ -19,11 +21,9 @@ def get_conn():
 
 
 # ------------------------------------------------------------
-# (2) DB 스키마 초기화 — 앱 시작 시 1회 호출 (여러 프로세스가 동시에
-#     호출해도 database is locked 가 나면 조용히 무시하고 빠져나오도록 처리)
+# (2) DB 스키마 초기화 — 앱 시작 시 1회 호출
 # ------------------------------------------------------------
 def init_db():
-    # init 단계에서도 WAL + timeout 설정
     conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10.0)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
@@ -82,14 +82,11 @@ def init_db():
         );
         """)
 
-
         conn.commit()
 
     except sqlite3.OperationalError as e:
-        # 다른 프로세스가 이미 init_db 를 실행 중이라 잠깐 락이 걸릴 수 있음
-        # 이 경우에는 "이미 누가 초기화하고 있다"고 보고 그냥 넘어가도 됨.
+        # 동시에 여러 프로세스가 init_db를 치면 잠깐 락이 걸릴 수 있음
         if "database is locked" in str(e):
-            # 필요하다면 여기서 로그만 남기고 조용히 패스
             pass
         else:
             raise
@@ -105,7 +102,7 @@ def list_user_code_files(user_id: int) -> List[str]:
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT filename 
+        SELECT filename
         FROM files
         WHERE user_id = ? AND filetype = 'code'
         ORDER BY datetime(uploaded_at) DESC
@@ -165,12 +162,6 @@ def delete_code_file(user_id: int, filename: str):
 # (6) 특정 코드 파일과 매칭되는 result 파일 목록 조회
 # ------------------------------------------------------------
 def list_results_for_code(user_id: int, code_filename: str) -> List[Dict]:
-    """
-    결과 파일 규칙 예시:
-    - train_xxx.py  → train_xxx_result.json
-    - train_xxx.py  → train_xxx_*.json
-    등 prefix 매칭용.
-    """
     conn = get_conn()
     cur = conn.cursor()
 
@@ -195,52 +186,39 @@ def list_results_for_code(user_id: int, code_filename: str) -> List[Dict]:
         for r in rows
     ]
 
+
 def delete_project_and_unused_files(project_id: int, user_id: int):
-    """
-    프로젝트 삭제 + 해당 프로젝트에 속한 파일들이 다른 프로젝트에 사용되지 않는다면 files에서도 삭제
-    """
     conn = get_conn()
     cur = conn.cursor()
 
-    # --- 1) 프로젝트 존재 / 권한 확인 ---
-    cur.execute("""
-        SELECT id FROM projects WHERE id=? AND user_id=?
-    """, (project_id, user_id))
+    # 프로젝트 존재 / 권한 확인
+    cur.execute("SELECT id FROM projects WHERE id=? AND user_id=?", (project_id, user_id))
     row = cur.fetchone()
     if not row:
         conn.close()
         return {"error": "Project does not exist or permission denied."}
 
-    # --- 2) 이 프로젝트가 사용하고 있는 모든 file_id 조회 ---
-    cur.execute("""
-        SELECT file_id FROM project_files 
-        WHERE project_id=?
-    """, (project_id,))
+    # 이 프로젝트가 사용하고 있는 file_id 조회
+    cur.execute("SELECT file_id FROM project_files WHERE project_id=?", (project_id,))
     file_ids = [r[0] for r in cur.fetchall()]
 
-    # --- 3) project_files 에서 이 프로젝트 row 삭제 ---
+    # project_files에서 프로젝트 row 삭제
     cur.execute("DELETE FROM project_files WHERE project_id=?", (project_id,))
 
-    # --- 4) 파일별로 '다른 프로젝트에 연결 여부 확인' ---
+    # 파일별로 다른 프로젝트에 연결 여부 확인
     for fid in file_ids:
-        cur.execute("""
-            SELECT COUNT(*) FROM project_files 
-            WHERE file_id=? 
-        """, (fid,))
+        cur.execute("SELECT COUNT(*) FROM project_files WHERE file_id=?", (fid,))
         cnt = cur.fetchone()[0]
 
-        # 다른 프로젝트에서도 사용되면 삭제하지 않음
         if cnt > 0:
             continue
 
-        # files 테이블에서 제거
         cur.execute("DELETE FROM files WHERE id=?", (fid,))
 
-    # --- 5) 프로젝트 자체 삭제 ---
+    # 프로젝트 자체 삭제
     cur.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
     conn.commit()
     conn.close()
 
     return {"ok": True}
-
