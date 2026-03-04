@@ -13,12 +13,47 @@
 아래 순서 그대로 수행하면 로컬 환경에서 사용할 수 있습니다.
 
 ### 1) 저장소 클론
-
 ```bash
 git clone https://github.com/goatyeon03/ML_Code_Insight.git
 cd ML_Code_Insight
 ```
-### 2) 백엔드 실행 (FastAPI)
+
+### 2) 실행 환경 세팅
+> Python 3.11 이상을 요구합니다.
+> 가상환경 생성 이후 실행해주세요.
+
+```bash
+python3.11 -m venv venv
+source venv/bin/activate      # macOS/Linux
+venv\Scripts\activate         # Windows
+```
+<br>
+
+*일부 기능은 Google AI Studio Gemini API를 사용합니다.<br>
+해당 기능을 사용하려면 아래 사이트에서 무료 API Key를 발급받아 환경 변수로 설정해야 합니다.
+
+<br>
+
+**API Key 발급:**
+<br>
+https://aistudio.google.com/app/apikey
+
+<br>
+
+**환경 변수 설정:**
+<br>
+macOS / Linux:
+```bash
+export GOOGLE_API_KEY="발급받은_API_키"
+```
+Windows PowerShell:
+```powershell
+setx GOOGLE_API_KEY "발급받은_API_키"
+```
+
+<br>
+
+### 3) 백엔드 실행 (FastAPI)
 
 ```bash
 cd backend
@@ -30,7 +65,7 @@ FastAPI 문서 접속:
 http://127.0.0.1:8000/docs
 ```
 
-### 3) 프론트엔드 실행 (Streamlit)
+### 4) 프론트엔드 실행 (Streamlit)
 
 ```bash
 cd frontend
